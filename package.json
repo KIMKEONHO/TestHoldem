@@ -1,0 +1,19 @@
+{
+  "name": "holdup-poker",
+  "version": "0.1.0",
+  "description": "최대 8명이 함께 즐기는 웹 기반 홀덤 게임 (서버 + 클라이언트)",
+  "private": true,
+  "scripts": {
+    "dev": "npm run dev --workspace=packages/client",
+    "build": "npm run build --workspace=packages/client",
+    "client:dev": "npm run dev --workspace=packages/client",
+    "client:build": "npm run build --workspace=packages/client"
+  },
+  "keywords": ["poker", "holdup", "홀덤", "multiplayer", "websocket"],
+  "author": "",
+  "license": "MIT",
+  "workspaces": [
+    "packages/client",
+    "packages/shared"
+  ]
+}

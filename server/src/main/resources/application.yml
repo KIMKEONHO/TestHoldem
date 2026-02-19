@@ -1,0 +1,18 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: holdup-server
+
+# 홀덤 게임 설정
+holdup:
+  game:
+    max-players-per-room: 8
+    min-players-to-start: 2
+
+logging:
+  level:
+    com.holdup: DEBUG
+    org.springframework.web.socket: DEBUG
+    org.springframework.messaging: DEBUG
