@@ -357,19 +357,6 @@ export function GameRoom({
                   ))}
                 </div>
                 <div className="phase">{tableState.handState?.phase ?? 'WAITING'}</div>
-                {mySeatSnapshot?.player?.holeCards && mySeatSnapshot.player.holeCards.length > 0 && (
-                  <div className="my-cards">
-                    <span className="my-cards-label">내 패:</span>
-                    {mySeatSnapshot.player.holeCards.map((code, i) => (
-                      <span key={i} className="card my-card">
-                        {formatCard(code)}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                {bestHandName && (
-                  <p className="best-hand">현재 최고 패: <strong>{bestHandName}</strong></p>
-                )}
                 {handState?.actingSeatIndex != null && (
                   <p className="turn-info">
                     {isMyTurn ? (
@@ -405,47 +392,6 @@ export function GameRoom({
                       )
                   )}
                 </div>
-                {handState?.phase !== 'WAITING' && (
-                  <>
-                    {isMyTurn && !amIFolded ? (
-                      <div className="actions">
-                        <button type="button" className="act-btn" onClick={() => sendAction('FOLD')}>
-                          폴드
-                        </button>
-                        <button type="button" className="act-btn" disabled={!canCheck} onClick={() => sendAction('CHECK')}>
-                          체크
-                        </button>
-                        <button type="button" className="act-btn" disabled={!canCall} onClick={() => sendAction('CALL')}>
-                          콜 {canCall ? toCall : ''}
-                        </button>
-                        <button
-                          type="button"
-                          className="act-btn"
-                          disabled={!canRaise}
-                          onClick={() => sendAction('RAISE', toCall + minRaise)}
-                        >
-                          최소 레이즈 {toCall + minRaise}
-                        </button>
-                        <button type="button" className="act-btn" disabled={myStack <= 0} onClick={() => sendAction('ALL_IN')}>
-                          올인
-                        </button>
-                      </div>
-                    ) : (
-                      <p className="waiting-turn">
-                        {amIFolded ? '폴드하셨습니다.' : '다른 플레이어의 턴을 기다리는 중…'}
-                      </p>
-                    )}
-                  </>
-                )}
-                {handState?.phase === 'WAITING' && mySeatIndex != null && (
-                  <button
-                    type="button"
-                    className="btn start-hand"
-                    onClick={() => sendAction('START_HAND')}
-                  >
-                    핸드 시작
-                  </button>
-                )}
                 {tableState && (!tableState.seats || tableState.seats.length === 0) && (
                   <button type="button" className="btn start-hand" onClick={sendJoin}>
                     상태 새로고침
@@ -467,6 +413,70 @@ export function GameRoom({
             )}
           </div>
         </div>
+      </div>
+
+      {/* 하단 고정: 내 패 + 액션 버튼 (참고 이미지 레이아웃) */}
+      <div className="player-bar">
+        <div className="my-hand-section">
+          {mySeatSnapshot?.player?.holeCards && mySeatSnapshot.player.holeCards.length > 0 ? (
+            <>
+              <span className="my-hand-label">내 패</span>
+              <div className="my-hand-cards">
+                {mySeatSnapshot.player.holeCards.map((code, i) => (
+                  <div key={i} className="poker-card">
+                    {formatCard(code)}
+                  </div>
+                ))}
+              </div>
+              {bestHandName && (
+                <span className="my-best-hand">{bestHandName}</span>
+              )}
+            </>
+          ) : (
+            handState?.phase !== 'WAITING' && !amIFolded && (
+              <span className="my-hand-placeholder">카드 배분 중…</span>
+            )
+          )}
+          {amIFolded && handState?.phase !== 'WAITING' && (
+            <span className="my-hand-folded">폴드</span>
+          )}
+        </div>
+        {handState?.phase !== 'WAITING' ? (
+          isMyTurn && !amIFolded ? (
+            <div className="action-bar">
+              <button type="button" className="action-btn fold" onClick={() => sendAction('FOLD')}>
+                다이
+              </button>
+              <button type="button" className="action-btn" disabled={!canCheck} onClick={() => sendAction('CHECK')}>
+                체크
+              </button>
+              <button type="button" className="action-btn" disabled={!canCall} onClick={() => sendAction('CALL')}>
+                콜 {canCall ? `(${toCall})` : ''}
+              </button>
+              <button
+                type="button"
+                className="action-btn raise"
+                disabled={!canRaise}
+                onClick={() => sendAction('RAISE', toCall + minRaise)}
+              >
+                레이즈
+              </button>
+              <button type="button" className="action-btn allin" disabled={myStack <= 0} onClick={() => sendAction('ALL_IN')}>
+                올인
+              </button>
+            </div>
+          ) : (
+            <p className="waiting-turn">
+              {amIFolded ? '폴드하셨습니다.' : '다른 플레이어의 턴을 기다리는 중…'}
+            </p>
+          )
+        ) : (
+          mySeatIndex != null && (
+            <button type="button" className="action-btn start-hand" onClick={() => sendAction('START_HAND')}>
+              핸드 시작
+            </button>
+          )
+        )}
       </div>
 
       {!isConnected && (
@@ -602,51 +612,106 @@ export function GameRoom({
         .seat-stack { font-size: 0.8rem; opacity: 0.9; }
         .hole-cards { display: block; font-size: 0.75rem; margin-top: 2px; }
         .fold-label { font-size: 0.75rem; color: var(--text-muted); }
-        .actions {
+
+        /* 하단 고정: 내 패 + 액션 버튼 */
+        .player-bar {
+          flex-shrink: 0;
+          background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+          border-top: 1px solid rgba(56, 189, 248, 0.25);
+          padding: 12px 16px;
+          padding-bottom: max(12px, var(--safe-bottom));
+          box-shadow: 0 -4px 24px rgba(0,0,0,0.3);
+        }
+        .my-hand-section {
+          text-align: center;
+          margin-bottom: 12px;
+          min-height: 52px;
+        }
+        .my-hand-label {
+          display: block;
+          font-size: 0.75rem;
+          color: var(--text-muted);
+          margin-bottom: 6px;
+        }
+        .my-hand-cards {
           display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
           justify-content: center;
+          gap: 8px;
+          align-items: center;
         }
-        .act-btn {
-          padding: 8px 14px;
-          border-radius: var(--radius);
-          background: var(--accent);
-          color: var(--bg-dark);
-          font-weight: 600;
-          font-size: 0.85rem;
-        }
-        .act-btn:active { opacity: 0.9; }
-        .act-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-        .my-cards {
+        .poker-card {
+          width: 48px;
+          height: 64px;
+          border-radius: 6px;
+          background: linear-gradient(145deg, #fff 0%, #e2e8f0 100%);
+          color: #1e293b;
+          font-size: 1rem;
+          font-weight: 700;
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 8px;
-          margin-bottom: 12px;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.2), 0 0 0 1px rgba(0,0,0,0.06);
         }
-        .my-cards-label {
-          font-size: 0.9rem;
-          font-weight: 600;
-        }
-        .best-hand {
-          margin: 0 0 10px 0;
-          font-size: 0.9rem;
+        .my-best-hand {
+          display: inline-block;
+          font-size: 0.8rem;
           color: #fde68a;
+          margin-top: 4px;
         }
-        .best-hand strong {
-          color: #fef3c7;
+        .my-hand-placeholder, .my-hand-folded {
+          font-size: 0.9rem;
+          color: var(--text-muted);
         }
-        .card.my-card {
-          background: linear-gradient(135deg, #fff 0%, #e2e8f0 100%);
-          padding: 8px 12px;
-          font-size: 1rem;
-          font-weight: 600;
+        .my-hand-folded { color: var(--danger); }
+        .action-bar {
+          display: flex;
+          gap: 8px;
+          justify-content: center;
+          flex-wrap: wrap;
+        }
+        .action-btn {
+          flex: 1;
+          min-width: 64px;
+          padding: 12px 10px;
+          border: none;
+          border-radius: 10px;
+          font-weight: 700;
+          font-size: 0.9rem;
+          color: #fff;
+          background: linear-gradient(135deg, #0d9488 0%, #0e7490 50%, #0369a1 100%);
+          box-shadow: 0 2px 12px rgba(6, 182, 212, 0.4);
+          cursor: pointer;
+          transition: transform 0.1s, box-shadow 0.2s;
+        }
+        .action-btn:active { transform: scale(0.98); }
+        .action-btn:disabled {
+          opacity: 0.45;
+          cursor: not-allowed;
+          box-shadow: none;
+        }
+        .action-btn.fold {
+          background: linear-gradient(135deg, #64748b 0%, #475569 100%);
+          box-shadow: 0 2px 12px rgba(100, 116, 139, 0.4);
+        }
+        .action-btn.raise {
+          background: linear-gradient(135deg, #0d9488 0%, #059669 100%);
+        }
+        .action-btn.allin {
+          background: linear-gradient(135deg, #b45309 0%, #d97706 100%);
+          box-shadow: 0 2px 12px rgba(217, 119, 6, 0.4);
+        }
+        .action-btn.start-hand {
+          width: 100%;
+          max-width: 200px;
+          margin: 0 auto;
+          background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+          box-shadow: 0 2px 12px rgba(16, 185, 129, 0.4);
         }
         .waiting-turn {
+          text-align: center;
           font-size: 0.9rem;
-          opacity: 0.9;
-          margin: 8px 0 0 0;
+          color: var(--text-muted);
+          margin: 0;
         }
         .btn.start-hand {
           padding: 10px 20px;
