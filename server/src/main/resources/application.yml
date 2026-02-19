@@ -9,6 +9,7 @@ spring:
 holdup:
   game:
     max-players-per-room: 8
+    # 핸드 시작에 필요한 최소 인원 (2=일반, 1=테스트용 혼자 플레이)
     min-players-to-start: 2
 
 logging:
