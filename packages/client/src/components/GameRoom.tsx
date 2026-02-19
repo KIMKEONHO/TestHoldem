@@ -41,6 +41,19 @@ export function GameRoom({
     });
   };
 
+  const syncMySeatIndex = (snapshot: TableSnapshot) => {
+    const byHoleCards = snapshot.seats.find((seat) => (seat.player?.holeCards?.length ?? 0) > 0);
+    if (byHoleCards) {
+      setMySeatIndex(byHoleCards.seatIndex);
+      return;
+    }
+
+    const byNickname = snapshot.seats.find((seat) => seat.player?.displayName === nickname);
+    if (byNickname) {
+      setMySeatIndex(byNickname.seatIndex);
+    }
+  };
+
   useEffect(() => {
     if (!isConnected || !roomId || !nickname) return;
 
@@ -50,12 +63,9 @@ export function GameRoom({
     const unsub = subscribe(`${TOPIC_PREFIX}/table/${roomId}`, (body) => {
       try {
         const res = typeof body === 'string' ? (JSON.parse(body) as ActionResult) : (body as ActionResult);
-        // 내 시트 번호는 입장(JOIN_TABLE) 응답에서만 설정. 다른 액션 응답의 seatIndex로 덮어쓰지 않음.
-        if (res.actionType === 'JOIN_TABLE' && res.seatIndex != null) {
-          setMySeatIndex(res.seatIndex);
-        }
         if (res.payload?.tableState) {
           setTableState(res.payload.tableState);
+          syncMySeatIndex(res.payload.tableState);
           setJoinError(null);
           setJoinTimeout(false);
         } else if (res.success && res.tableId) {
@@ -92,6 +102,7 @@ export function GameRoom({
         const res = typeof body === 'string' ? (JSON.parse(body) as ActionResult) : (body as ActionResult);
         if (res.payload?.tableState) {
           setTableState(res.payload.tableState);
+          syncMySeatIndex(res.payload.tableState);
           setJoinError(null);
           setJoinTimeout(false);
         }
@@ -154,7 +165,8 @@ export function GameRoom({
     actingSeat === mySeat;
 
   // 내 시트 정보 (홀카드 표시용)
-  const mySeatSnapshot = tableState?.seats?.find((s) => s.seatIndex === mySeatIndex);
+  const mySeatSnapshot = tableState?.seats?.find((s) => s.seatIndex === mySeatIndex)
+    ?? tableState?.seats?.find((s) => s.player?.displayName === nickname);
   const amIFolded = mySeatSnapshot?.player?.folded ?? false;
   const myStack = Number(mySeatSnapshot?.player?.stack ?? 0);
   const myBetThisStreet = Number(mySeatSnapshot?.player?.currentBetThisStreet ?? 0);
@@ -235,7 +247,7 @@ export function GameRoom({
                         >
                           <span className="seat-name">{seat.player.displayName}</span>
                           <span className="seat-stack">{Number(seat.player.stack)}</span>
-                          {seat.player.holeCards?.length ? (
+                          {seat.seatIndex === mySeatIndex && seat.player.holeCards?.length ? (
                             <span className="hole-cards">
                               {seat.player.holeCards.join(' ')}
                             </span>
@@ -441,7 +453,7 @@ export function GameRoom({
         }
         .seat-name { display: block; font-weight: 600; }
         .seat-stack { font-size: 0.8rem; opacity: 0.9; }
-        .hole-cards { font-size: 0.75rem; margin-left: 4px; }
+        .hole-cards { display: block; font-size: 0.75rem; margin-top: 2px; }
         .fold-label { font-size: 0.75rem; color: var(--text-muted); }
         .actions {
           display: flex;
