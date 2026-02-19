@@ -1,3 +1,4 @@
+
 import { useEffect, useMemo, useState } from 'react';
 import { APP_PREFIX, TOPIC_PREFIX, USER_QUEUE_TABLE_STATE } from '../config';
 import type {
@@ -147,6 +148,34 @@ function formatCard(cardCode: string): string {
   return `${rankPart}${suit}`;
 }
 
+type SeatActionBubble = {
+  text: string;
+  mine: boolean;
+};
+
+const ACTION_LABEL: Partial<Record<GameActionType, string>> = {
+  FOLD: '폴드',
+  CHECK: '체크',
+  CALL: '콜',
+  BET: '베팅',
+  RAISE: '레이즈',
+  ALL_IN: '올인',
+  START_HAND: '핸드 시작',
+  LEAVE_TABLE: '퇴장',
+  SIT_OUT: '잠시 비움',
+  READY: '준비 완료',
+};
+
+function toActionBubbleText(result: ActionResult): string | null {
+  if (!result.actionType) return null;
+  const label = ACTION_LABEL[result.actionType];
+  if (!label) return null;
+  const amount = result.amount != null ? Number(result.amount) : null;
+  if (amount != null && ['CALL', 'BET', 'RAISE', 'ALL_IN'].includes(result.actionType)) {
+    return `${label} ${amount}`;
+  }
+  return label;
+}
 interface GameRoomProps {
   roomId: string;
   nickname: string;
@@ -168,6 +197,8 @@ export function GameRoom({
   const [joinError, setJoinError] = useState<string | null>(null);
   const [mySeatIndex, setMySeatIndex] = useState<number | null>(null);
   const [joinTimeout, setJoinTimeout] = useState(false);
+  const [seatBubbles, setSeatBubbles] = useState<Record<number, SeatActionBubble>>({});
+  const bubbleTimersRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
 
   const sendJoin = () => {
     if (!isConnected || !roomId || !nickname) return;
@@ -193,6 +224,31 @@ export function GameRoom({
     }
   };
 
+
+  const showActionBubble = (result: ActionResult) => {
+    const text = toActionBubbleText(result);
+    if (result.seatIndex == null || !text) return;
+
+    const seatIndex = Number(result.seatIndex);
+    const mine = result.playerId != null && result.playerId === mySeatSnapshot?.player?.id;
+    setSeatBubbles((prev) => ({
+      ...prev,
+      [seatIndex]: { text, mine },
+    }));
+
+    if (bubbleTimersRef.current[seatIndex]) {
+      clearTimeout(bubbleTimersRef.current[seatIndex]);
+    }
+    bubbleTimersRef.current[seatIndex] = setTimeout(() => {
+      setSeatBubbles((prev) => {
+        const next = { ...prev };
+        delete next[seatIndex];
+        return next;
+      });
+      delete bubbleTimersRef.current[seatIndex];
+    }, 2000);
+  };
+
   useEffect(() => {
     if (!isConnected || !roomId || !nickname) return;
 
@@ -202,6 +258,7 @@ export function GameRoom({
     const unsub = subscribe(`${TOPIC_PREFIX}/table/${roomId}`, (body) => {
       try {
         const res = typeof body === 'string' ? (JSON.parse(body) as ActionResult) : (body as ActionResult);
+        showActionBubble(res);
         if (res.payload?.tableState) {
           setTableState(res.payload.tableState);
           syncMySeatIndex(res.payload.tableState);
@@ -239,6 +296,7 @@ export function GameRoom({
     const unsubUser = subscribe(USER_QUEUE_TABLE_STATE, (body) => {
       try {
         const res = typeof body === 'string' ? (JSON.parse(body) as ActionResult) : (body as ActionResult);
+        showActionBubble(res);
         if (res.payload?.tableState) {
           setTableState(res.payload.tableState);
           syncMySeatIndex(res.payload.tableState);
@@ -265,6 +323,8 @@ export function GameRoom({
       clearTimeout(joinTimer);
       clearTimeout(timeoutTimer);
       clearTimeout(retryTimer);
+      Object.values(bubbleTimersRef.current).forEach((timer) => clearTimeout(timer));
+      bubbleTimersRef.current = {};
       // 구독 해제를 약간 지연해 Strict Mode에서 즉시 UNSUB 되는 것 방지
       setTimeout(() => {
         unsub();
@@ -357,6 +417,19 @@ export function GameRoom({
                   ))}
                 </div>
                 <div className="phase">{tableState.handState?.phase ?? 'WAITING'}</div>
+                {mySeatSnapshot?.player?.holeCards && mySeatSnapshot.player.holeCards.length > 0 && (
+                  <div className="my-cards">
+                    <span className="my-cards-label">내 패:</span>
+                    {mySeatSnapshot.player.holeCards.map((code, i) => (
+                      <span key={i} className="card my-card">
+                        {formatCard(code)}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {bestHandName && (
+                  <p className="best-hand">현재 최고 패: <strong>{bestHandName}</strong></p>
+                )}
                 {handState?.actingSeatIndex != null && (
                   <p className="turn-info">
                     {isMyTurn ? (
@@ -379,8 +452,13 @@ export function GameRoom({
                           key={seat.seatIndex}
                           className={`seat ${seat.seatIndex === mySeatIndex ? 'me' : ''} ${seat.player.folded ? 'folded' : ''}`}
                         >
-                          <span className="seat-name">{seat.player.displayName}</span>
+                          <span className="seat-name">시트 {seat.seatIndex + 1} · {seat.player.displayName}</span>
                           <span className="seat-stack">{Number(seat.player.stack)}</span>
+                          {seatBubbles[seat.seatIndex] && (
+                            <span className={`action-bubble ${seatBubbles[seat.seatIndex].mine ? 'mine' : ''}`}>
+                              {seatBubbles[seat.seatIndex].text}
+                            </span>
+                          )}
                           {seat.seatIndex === mySeatIndex && seat.player.holeCards?.length ? (
                             <span className="hole-cards">
                               {seat.player.holeCards.map((code) => formatCard(code)).join(' ')}
@@ -392,6 +470,47 @@ export function GameRoom({
                       )
                   )}
                 </div>
+                {handState?.phase !== 'WAITING' && (
+                  <>
+                    {isMyTurn && !amIFolded ? (
+                      <div className="actions">
+                        <button type="button" className="act-btn" onClick={() => sendAction('FOLD')}>
+                          폴드
+                        </button>
+                        <button type="button" className="act-btn" disabled={!canCheck} onClick={() => sendAction('CHECK')}>
+                          체크
+                        </button>
+                        <button type="button" className="act-btn" disabled={!canCall} onClick={() => sendAction('CALL')}>
+                          콜 {canCall ? toCall : ''}
+                        </button>
+                        <button
+                          type="button"
+                          className="act-btn"
+                          disabled={!canRaise}
+                          onClick={() => sendAction('RAISE', toCall + minRaise)}
+                        >
+                          최소 레이즈 {toCall + minRaise}
+                        </button>
+                        <button type="button" className="act-btn" disabled={myStack <= 0} onClick={() => sendAction('ALL_IN')}>
+                          올인
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="waiting-turn">
+                        {amIFolded ? '폴드하셨습니다.' : '다른 플레이어의 턴을 기다리는 중…'}
+                      </p>
+                    )}
+                  </>
+                )}
+                {handState?.phase === 'WAITING' && mySeatIndex != null && (
+                  <button
+                    type="button"
+                    className="btn start-hand"
+                    onClick={() => sendAction('START_HAND')}
+                  >
+                    핸드 시작
+                  </button>
+                )}
                 {tableState && (!tableState.seats || tableState.seats.length === 0) && (
                   <button type="button" className="btn start-hand" onClick={sendJoin}>
                     상태 새로고침
