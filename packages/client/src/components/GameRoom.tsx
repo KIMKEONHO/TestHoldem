@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { APP_PREFIX, TOPIC_PREFIX, USER_QUEUE_TABLE_STATE } from '../config';
 import type {
   ActionResult,
@@ -7,6 +7,145 @@ import type {
   HandStateSnapshot,
   SeatSnapshot,
 } from '../types/game';
+
+
+const SUIT_SYMBOL: Record<string, string> = {
+  h: '♥',
+  d: '♦',
+  c: '♣',
+  s: '♠',
+};
+
+
+
+type ParsedCard = { rank: number; suit: string };
+
+type HandValue = {
+  category: number;
+  tiebreakers: number[];
+  name: string;
+};
+
+const HAND_NAME: Record<number, string> = {
+  9: '로열 플러시',
+  8: '스트레이트 플러시',
+  7: '포카드',
+  6: '풀하우스',
+  5: '플러시',
+  4: '스트레이트',
+  3: '트리플',
+  2: '투페어',
+  1: '원페어',
+  0: '하이카드',
+};
+
+function parseCard(code: string): ParsedCard | null {
+  const c = code.trim().toLowerCase();
+  if (c.length < 2) return null;
+  const suit = c.slice(-1);
+  const rankRaw = c.slice(0, -1).toUpperCase();
+  const rank = rankRaw === 'A' ? 14 : rankRaw === 'K' ? 13 : rankRaw === 'Q' ? 12 : rankRaw === 'J' ? 11 : rankRaw === 'T' ? 10 : Number(rankRaw);
+  if (!['h', 'd', 'c', 's'].includes(suit) || Number.isNaN(rank) || rank < 2 || rank > 14) return null;
+  return { rank, suit };
+}
+
+function findStraightTop(ranks: number[]): number | null {
+  const uniq = [...new Set(ranks)].sort((a, b) => a - b);
+  if (uniq.length !== 5) return null;
+  const isWheel = uniq.join(',') === '2,3,4,5,14';
+  if (isWheel) return 5;
+  return uniq[4] - uniq[0] === 4 ? uniq[4] : null;
+}
+
+function evaluateFiveCodes(cards: string[]): HandValue {
+  const parsed = cards.map(parseCard).filter((c): c is ParsedCard => c != null);
+  if (parsed.length !== 5) return { category: 0, tiebreakers: [0], name: HAND_NAME[0] };
+
+  const ranksDesc = parsed.map((c) => c.rank).sort((a, b) => b - a);
+  const isFlush = parsed.every((c) => c.suit === parsed[0].suit);
+  const straightTop = findStraightTop(parsed.map((c) => c.rank));
+
+  const countMap = new Map<number, number>();
+  for (const r of parsed.map((c) => c.rank)) countMap.set(r, (countMap.get(r) ?? 0) + 1);
+  const byCountThenRank = [...countMap.entries()].sort((a, b) => (b[1] - a[1]) || (b[0] - a[0]));
+
+  if (isFlush && straightTop === 14) return { category: 9, tiebreakers: [14], name: HAND_NAME[9] };
+  if (isFlush && straightTop != null) return { category: 8, tiebreakers: [straightTop], name: HAND_NAME[8] };
+  if (byCountThenRank[0][1] === 4) {
+    const quad = byCountThenRank[0][0];
+    const kicker = byCountThenRank.find((x) => x[0] !== quad)?.[0] ?? 0;
+    return { category: 7, tiebreakers: [quad, kicker], name: HAND_NAME[7] };
+  }
+  if (byCountThenRank[0][1] === 3 && byCountThenRank[1][1] === 2) {
+    return { category: 6, tiebreakers: [byCountThenRank[0][0], byCountThenRank[1][0]], name: HAND_NAME[6] };
+  }
+  if (isFlush) return { category: 5, tiebreakers: ranksDesc, name: HAND_NAME[5] };
+  if (straightTop != null) return { category: 4, tiebreakers: [straightTop], name: HAND_NAME[4] };
+  if (byCountThenRank[0][1] === 3) {
+    const trip = byCountThenRank[0][0];
+    const kickers = byCountThenRank.filter((x) => x[0] !== trip).map((x) => x[0]).sort((a, b) => b - a);
+    return { category: 3, tiebreakers: [trip, ...kickers], name: HAND_NAME[3] };
+  }
+  if (byCountThenRank[0][1] === 2 && byCountThenRank[1][1] === 2) {
+    const pairs = byCountThenRank.filter((x) => x[1] === 2).map((x) => x[0]).sort((a, b) => b - a);
+    const kicker = byCountThenRank.find((x) => x[1] === 1)?.[0] ?? 0;
+    return { category: 2, tiebreakers: [pairs[0], pairs[1], kicker], name: HAND_NAME[2] };
+  }
+  if (byCountThenRank[0][1] === 2) {
+    const pair = byCountThenRank[0][0];
+    const kickers = byCountThenRank.filter((x) => x[1] === 1).map((x) => x[0]).sort((a, b) => b - a);
+    return { category: 1, tiebreakers: [pair, ...kickers], name: HAND_NAME[1] };
+  }
+  return { category: 0, tiebreakers: ranksDesc, name: HAND_NAME[0] };
+}
+
+function compareHand(a: HandValue, b: HandValue): number {
+  if (a.category !== b.category) return a.category - b.category;
+  const n = Math.max(a.tiebreakers.length, b.tiebreakers.length);
+  for (let i = 0; i < n; i += 1) {
+    const av = a.tiebreakers[i] ?? 0;
+    const bv = b.tiebreakers[i] ?? 0;
+    if (av !== bv) return av - bv;
+  }
+  return 0;
+}
+
+function chooseFive(cards: string[]): string[][] {
+  const out: string[][] = [];
+  for (let a = 0; a < cards.length - 4; a += 1) {
+    for (let b = a + 1; b < cards.length - 3; b += 1) {
+      for (let c = b + 1; c < cards.length - 2; c += 1) {
+        for (let d = c + 1; d < cards.length - 1; d += 1) {
+          for (let e = d + 1; e < cards.length; e += 1) {
+            out.push([cards[a], cards[b], cards[c], cards[d], cards[e]]);
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+function getBestHandName(holeCards: string[], communityCards: string[]): string | null {
+  const all = [...holeCards, ...communityCards].filter(Boolean);
+  if (all.length < 5) return null;
+  let best: HandValue | null = null;
+  for (const combo of chooseFive(all)) {
+    const evaluated = evaluateFiveCodes(combo);
+    if (!best || compareHand(evaluated, best) > 0) best = evaluated;
+  }
+  return best?.name ?? null;
+}
+
+function formatCard(cardCode: string): string {
+  if (!cardCode) return '';
+  const trimmed = cardCode.trim();
+  const suitKey = trimmed.slice(-1).toLowerCase();
+  const rankPart = trimmed.slice(0, -1).toUpperCase();
+  const suit = SUIT_SYMBOL[suitKey];
+  if (!suit || !rankPart) return trimmed;
+  return `${rankPart}${suit}`;
+}
 
 interface GameRoomProps {
   roomId: string;
@@ -167,6 +306,11 @@ export function GameRoom({
   // 내 시트 정보 (홀카드 표시용)
   const mySeatSnapshot = tableState?.seats?.find((s) => s.seatIndex === mySeatIndex)
     ?? tableState?.seats?.find((s) => s.player?.displayName === nickname);
+  const bestHandName = useMemo(() => {
+    const holeCards = mySeatSnapshot?.player?.holeCards ?? [];
+    const communityCards = tableState?.handState?.communityCards ?? [];
+    return getBestHandName(holeCards, communityCards);
+  }, [mySeatSnapshot?.player?.holeCards, tableState?.handState?.communityCards]);
   const amIFolded = mySeatSnapshot?.player?.folded ?? false;
   const myStack = Number(mySeatSnapshot?.player?.stack ?? 0);
   const myBetThisStreet = Number(mySeatSnapshot?.player?.currentBetThisStreet ?? 0);
@@ -208,7 +352,7 @@ export function GameRoom({
                 <div className="community-cards">
                   {(tableState.handState?.communityCards ?? []).map((code, i) => (
                     <span key={i} className="card">
-                      {code}
+                      {formatCard(code)}
                     </span>
                   ))}
                 </div>
@@ -218,10 +362,13 @@ export function GameRoom({
                     <span className="my-cards-label">내 패:</span>
                     {mySeatSnapshot.player.holeCards.map((code, i) => (
                       <span key={i} className="card my-card">
-                        {code}
+                        {formatCard(code)}
                       </span>
                     ))}
                   </div>
+                )}
+                {bestHandName && (
+                  <p className="best-hand">현재 최고 패: <strong>{bestHandName}</strong></p>
                 )}
                 {handState?.actingSeatIndex != null && (
                   <p className="turn-info">
@@ -249,7 +396,7 @@ export function GameRoom({
                           <span className="seat-stack">{Number(seat.player.stack)}</span>
                           {seat.seatIndex === mySeatIndex && seat.player.holeCards?.length ? (
                             <span className="hole-cards">
-                              {seat.player.holeCards.join(' ')}
+                              {seat.player.holeCards.map((code) => formatCard(code)).join(' ')}
                             </span>
                           ) : (
                             seat.player.folded && <span className="fold-label">폴드</span>
@@ -481,6 +628,14 @@ export function GameRoom({
         .my-cards-label {
           font-size: 0.9rem;
           font-weight: 600;
+        }
+        .best-hand {
+          margin: 0 0 10px 0;
+          font-size: 0.9rem;
+          color: #fde68a;
+        }
+        .best-hand strong {
+          color: #fef3c7;
         }
         .card.my-card {
           background: linear-gradient(135deg, #fff 0%, #e2e8f0 100%);

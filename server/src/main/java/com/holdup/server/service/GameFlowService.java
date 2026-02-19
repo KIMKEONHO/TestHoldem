@@ -45,6 +45,8 @@ public class GameFlowService {
         Table table = opt.get();
         HandState state = table.getHandState();
 
+        removeBustedPlayers(table);
+
         if (state.getPhase() != GamePhase.WAITING) return false;
         if (table.countOccupiedSeats() < minPlayersToStart) return false;
 
@@ -235,6 +237,7 @@ public class GameFlowService {
             table.getHandState().setPot(BigDecimal.ZERO);
             table.getHandState().setPhase(GamePhase.WAITING);
             table.setDeck(null);
+            removeBustedPlayers(table);
             return;
         }
 
@@ -262,6 +265,8 @@ public class GameFlowService {
         table.getHandState().setPot(BigDecimal.ZERO);
         table.getHandState().setPhase(GamePhase.WAITING);
         table.setDeck(null);
+
+        removeBustedPlayers(table);
     }
 
     private void awardPotToLastStanding(Table table) {
@@ -275,5 +280,19 @@ public class GameFlowService {
         table.getHandState().setPot(BigDecimal.ZERO);
         table.getHandState().setPhase(GamePhase.WAITING);
         table.setDeck(null);
+
+        removeBustedPlayers(table);
+    }
+
+    private void removeBustedPlayers(Table table) {
+        for (Seat seat : table.getSeats()) {
+            if (seat.isEmpty()) continue;
+            Player player = seat.getPlayer();
+            if (player.getStack().signum() <= 0) {
+                seat.setPlayer(null);
+                seat.clearTotalBetThisHand();
+            }
+        }
     }
 }
+
