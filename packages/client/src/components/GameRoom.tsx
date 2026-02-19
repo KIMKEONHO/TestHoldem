@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+
+import { useEffect, useMemo, useState } from 'react';
 import { APP_PREFIX, TOPIC_PREFIX, USER_QUEUE_TABLE_STATE } from '../config';
 import type {
   ActionResult,
@@ -147,8 +148,6 @@ function formatCard(cardCode: string): string {
   return `${rankPart}${suit}`;
 }
 
-
-
 type SeatActionBubble = {
   text: string;
   mine: boolean;
@@ -177,7 +176,6 @@ function toActionBubbleText(result: ActionResult): string | null {
   }
   return label;
 }
-
 interface GameRoomProps {
   roomId: string;
   nickname: string;
@@ -227,7 +225,6 @@ export function GameRoom({
   };
 
 
-
   const showActionBubble = (result: ActionResult) => {
     const text = toActionBubbleText(result);
     if (result.seatIndex == null || !text) return;
@@ -251,6 +248,7 @@ export function GameRoom({
       delete bubbleTimersRef.current[seatIndex];
     }, 2000);
   };
+
   useEffect(() => {
     if (!isConnected || !roomId || !nickname) return;
 
@@ -536,6 +534,70 @@ export function GameRoom({
         </div>
       </div>
 
+      {/* 하단 고정: 내 패 + 액션 버튼 (참고 이미지 레이아웃) */}
+      <div className="player-bar">
+        <div className="my-hand-section">
+          {mySeatSnapshot?.player?.holeCards && mySeatSnapshot.player.holeCards.length > 0 ? (
+            <>
+              <span className="my-hand-label">내 패</span>
+              <div className="my-hand-cards">
+                {mySeatSnapshot.player.holeCards.map((code, i) => (
+                  <div key={i} className="poker-card">
+                    {formatCard(code)}
+                  </div>
+                ))}
+              </div>
+              {bestHandName && (
+                <span className="my-best-hand">{bestHandName}</span>
+              )}
+            </>
+          ) : (
+            handState?.phase !== 'WAITING' && !amIFolded && (
+              <span className="my-hand-placeholder">카드 배분 중…</span>
+            )
+          )}
+          {amIFolded && handState?.phase !== 'WAITING' && (
+            <span className="my-hand-folded">폴드</span>
+          )}
+        </div>
+        {handState?.phase !== 'WAITING' ? (
+          isMyTurn && !amIFolded ? (
+            <div className="action-bar">
+              <button type="button" className="action-btn fold" onClick={() => sendAction('FOLD')}>
+                다이
+              </button>
+              <button type="button" className="action-btn" disabled={!canCheck} onClick={() => sendAction('CHECK')}>
+                체크
+              </button>
+              <button type="button" className="action-btn" disabled={!canCall} onClick={() => sendAction('CALL')}>
+                콜 {canCall ? `(${toCall})` : ''}
+              </button>
+              <button
+                type="button"
+                className="action-btn raise"
+                disabled={!canRaise}
+                onClick={() => sendAction('RAISE', toCall + minRaise)}
+              >
+                레이즈
+              </button>
+              <button type="button" className="action-btn allin" disabled={myStack <= 0} onClick={() => sendAction('ALL_IN')}>
+                올인
+              </button>
+            </div>
+          ) : (
+            <p className="waiting-turn">
+              {amIFolded ? '폴드하셨습니다.' : '다른 플레이어의 턴을 기다리는 중…'}
+            </p>
+          )
+        ) : (
+          mySeatIndex != null && (
+            <button type="button" className="action-btn start-hand" onClick={() => sendAction('START_HAND')}>
+              핸드 시작
+            </button>
+          )
+        )}
+      </div>
+
       {!isConnected && (
         <div className="connection-lost">
           서버와 연결이 끊겼습니다. 로비에서 다시 연결해 주세요.
@@ -669,70 +731,106 @@ export function GameRoom({
         .seat-stack { font-size: 0.8rem; opacity: 0.9; }
         .hole-cards { display: block; font-size: 0.75rem; margin-top: 2px; }
         .fold-label { font-size: 0.75rem; color: var(--text-muted); }
-        .action-bubble {
-          display: inline-block;
-          margin-top: 4px;
-          padding: 2px 8px;
-          border-radius: 999px;
-          background: rgba(15, 23, 42, 0.9);
-          color: #f8fafc;
-          font-size: 0.74rem;
-          border: 1px solid rgba(255, 255, 255, 0.25);
-          animation: pop-bubble 0.16s ease-out;
+
+        /* 하단 고정: 내 패 + 액션 버튼 */
+        .player-bar {
+          flex-shrink: 0;
+          background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+          border-top: 1px solid rgba(56, 189, 248, 0.25);
+          padding: 12px 16px;
+          padding-bottom: max(12px, var(--safe-bottom));
+          box-shadow: 0 -4px 24px rgba(0,0,0,0.3);
         }
-        .action-bubble.mine {
-          background: rgba(30, 64, 175, 0.9);
-          border-color: rgba(147, 197, 253, 0.7);
+        .my-hand-section {
+          text-align: center;
+          margin-bottom: 12px;
+          min-height: 52px;
         }
-        @keyframes pop-bubble {
-          from { transform: translateY(4px); opacity: 0; }
-          to { transform: translateY(0); opacity: 1; }
+        .my-hand-label {
+          display: block;
+          font-size: 0.75rem;
+          color: var(--text-muted);
+          margin-bottom: 6px;
         }
-        .actions {
+        .my-hand-cards {
           display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
           justify-content: center;
+          gap: 8px;
+          align-items: center;
         }
-        .act-btn {
-          padding: 8px 14px;
-          border-radius: var(--radius);
-          background: var(--accent);
-          color: var(--bg-dark);
-          font-weight: 600;
-          font-size: 0.85rem;
-        }
-        .act-btn:active { opacity: 0.9; }
-        .act-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-        .my-cards {
+        .poker-card {
+          width: 48px;
+          height: 64px;
+          border-radius: 6px;
+          background: linear-gradient(145deg, #fff 0%, #e2e8f0 100%);
+          color: #1e293b;
+          font-size: 1rem;
+          font-weight: 700;
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 8px;
-          margin-bottom: 12px;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.2), 0 0 0 1px rgba(0,0,0,0.06);
         }
-        .my-cards-label {
-          font-size: 0.9rem;
-          font-weight: 600;
-        }
-        .best-hand {
-          margin: 0 0 10px 0;
-          font-size: 0.9rem;
+        .my-best-hand {
+          display: inline-block;
+          font-size: 0.8rem;
           color: #fde68a;
+          margin-top: 4px;
         }
-        .best-hand strong {
-          color: #fef3c7;
+        .my-hand-placeholder, .my-hand-folded {
+          font-size: 0.9rem;
+          color: var(--text-muted);
         }
-        .card.my-card {
-          background: linear-gradient(135deg, #fff 0%, #e2e8f0 100%);
-          padding: 8px 12px;
-          font-size: 1rem;
-          font-weight: 600;
+        .my-hand-folded { color: var(--danger); }
+        .action-bar {
+          display: flex;
+          gap: 8px;
+          justify-content: center;
+          flex-wrap: wrap;
+        }
+        .action-btn {
+          flex: 1;
+          min-width: 64px;
+          padding: 12px 10px;
+          border: none;
+          border-radius: 10px;
+          font-weight: 700;
+          font-size: 0.9rem;
+          color: #fff;
+          background: linear-gradient(135deg, #0d9488 0%, #0e7490 50%, #0369a1 100%);
+          box-shadow: 0 2px 12px rgba(6, 182, 212, 0.4);
+          cursor: pointer;
+          transition: transform 0.1s, box-shadow 0.2s;
+        }
+        .action-btn:active { transform: scale(0.98); }
+        .action-btn:disabled {
+          opacity: 0.45;
+          cursor: not-allowed;
+          box-shadow: none;
+        }
+        .action-btn.fold {
+          background: linear-gradient(135deg, #64748b 0%, #475569 100%);
+          box-shadow: 0 2px 12px rgba(100, 116, 139, 0.4);
+        }
+        .action-btn.raise {
+          background: linear-gradient(135deg, #0d9488 0%, #059669 100%);
+        }
+        .action-btn.allin {
+          background: linear-gradient(135deg, #b45309 0%, #d97706 100%);
+          box-shadow: 0 2px 12px rgba(217, 119, 6, 0.4);
+        }
+        .action-btn.start-hand {
+          width: 100%;
+          max-width: 200px;
+          margin: 0 auto;
+          background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+          box-shadow: 0 2px 12px rgba(16, 185, 129, 0.4);
         }
         .waiting-turn {
+          text-align: center;
           font-size: 0.9rem;
-          opacity: 0.9;
-          margin: 8px 0 0 0;
+          color: var(--text-muted);
+          margin: 0;
         }
         .btn.start-hand {
           padding: 10px 20px;
