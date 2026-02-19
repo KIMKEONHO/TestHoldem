@@ -44,6 +44,9 @@ export function GameRoom({
   useEffect(() => {
     if (!isConnected || !roomId || !nickname) return;
 
+    setTableState(null);
+    setMySeatIndex(null);
+
     const unsub = subscribe(`${TOPIC_PREFIX}/table/${roomId}`, (body) => {
       try {
         const res = typeof body === 'string' ? (JSON.parse(body) as ActionResult) : (body as ActionResult);
@@ -108,21 +111,15 @@ export function GameRoom({
       });
     }, 2500);
 
-    let delayedUnsubId: ReturnType<typeof setTimeout>;
     return () => {
       clearTimeout(joinTimer);
       clearTimeout(timeoutTimer);
       clearTimeout(retryTimer);
       // 구독 해제를 약간 지연해 Strict Mode에서 즉시 UNSUB 되는 것 방지
-      delayedUnsubId = setTimeout(() => {
+      setTimeout(() => {
         unsub();
         unsubUser();
       }, 150);
-      return () => {
-        clearTimeout(delayedUnsubId);
-        unsub();
-        unsubUser();
-      };
     };
   }, [isConnected, roomId, nickname, subscribe, send]);
 
@@ -159,6 +156,14 @@ export function GameRoom({
   // 내 시트 정보 (홀카드 표시용)
   const mySeatSnapshot = tableState?.seats?.find((s) => s.seatIndex === mySeatIndex);
   const amIFolded = mySeatSnapshot?.player?.folded ?? false;
+  const myStack = Number(mySeatSnapshot?.player?.stack ?? 0);
+  const myBetThisStreet = Number(mySeatSnapshot?.player?.currentBetThisStreet ?? 0);
+  const currentBet = Number(handState?.currentBet ?? 0);
+  const minRaise = Math.max(1, Number(handState?.minRaise ?? 1));
+  const toCall = Math.max(0, currentBet - myBetThisStreet);
+  const canCheck = toCall === 0;
+  const canCall = toCall > 0 && myStack > 0;
+  const canRaise = myStack > toCall + minRaise;
 
   return (
     <div className="game-room">
@@ -248,20 +253,21 @@ export function GameRoom({
                         <button type="button" className="act-btn" onClick={() => sendAction('FOLD')}>
                           폴드
                         </button>
-                        <button type="button" className="act-btn" onClick={() => sendAction('CHECK')}>
+                        <button type="button" className="act-btn" disabled={!canCheck} onClick={() => sendAction('CHECK')}>
                           체크
                         </button>
-                        <button type="button" className="act-btn" onClick={() => sendAction('CALL')}>
-                          콜
+                        <button type="button" className="act-btn" disabled={!canCall} onClick={() => sendAction('CALL')}>
+                          콜 {canCall ? toCall : ''}
                         </button>
                         <button
                           type="button"
                           className="act-btn"
-                          onClick={() => sendAction('RAISE', Number(handState?.minRaise ?? 2))}
+                          disabled={!canRaise}
+                          onClick={() => sendAction('RAISE', toCall + minRaise)}
                         >
-                          레이즈
+                          최소 레이즈 {toCall + minRaise}
                         </button>
-                        <button type="button" className="act-btn" onClick={() => sendAction('ALL_IN')}>
+                        <button type="button" className="act-btn" disabled={myStack <= 0} onClick={() => sendAction('ALL_IN')}>
                           올인
                         </button>
                       </div>
@@ -452,6 +458,7 @@ export function GameRoom({
           font-size: 0.85rem;
         }
         .act-btn:active { opacity: 0.9; }
+        .act-btn:disabled { opacity: 0.45; cursor: not-allowed; }
         .my-cards {
           display: flex;
           align-items: center;
