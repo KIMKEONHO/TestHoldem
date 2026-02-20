@@ -14,4 +14,4 @@ export const TOPIC_PREFIX = '/topic';
 /** 본인 전용 (홀카드 포함 상태) - Spring이 /user/queue/... 로 라우팅 */
 export const USER_QUEUE_TABLE_STATE = '/user/queue/table-state';
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? `${protocol}//${host}`;
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
