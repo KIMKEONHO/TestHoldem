@@ -204,9 +204,7 @@ export function GameRoom({
   const [mySeatIndex, setMySeatIndex] = useState<number | null>(null);
   const [joinTimeout, setJoinTimeout] = useState(false);
   const [seatBubbles, setSeatBubbles] = useState<Record<number, SeatActionBubble>>({});
-
   const [notices, setNotices] = useState<TableNotice[]>([]);
-
   const bubbleTimersRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
 
   const sendJoin = () => {
@@ -232,6 +230,7 @@ export function GameRoom({
       setMySeatIndex(byNickname.seatIndex);
     }
   };
+
 
   const addNotice = (text: string) => {
     const id = Date.now() + Math.floor(Math.random() * 1000);
@@ -1024,6 +1023,14 @@ export function GameRoom({
         .poker-card .card-suit {
           font-size: 1.1rem;
           line-height: 1;
+        }
+        .best-hand {
+          margin: 0 0 10px 0;
+          font-size: 0.9rem;
+          color: #fde68a;
+        }
+        .best-hand strong {
+          color: #fef3c7;
         }
         .best-hand {
           margin: 0 0 10px 0;
