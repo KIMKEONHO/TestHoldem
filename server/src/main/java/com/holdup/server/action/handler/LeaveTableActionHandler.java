@@ -56,9 +56,11 @@ public class LeaveTableActionHandler implements ActionHandler {
                     .tableId(tableId)
                     .build();
         }
+        String displayName = table.getSeat(seatIndex).getPlayer().getDisplayName();
         table.getSeat(seatIndex).setPlayer(null);
         return ActionResult.builder()
                 .success(true)
+                .message((displayName != null ? displayName : "플레이어") + " 님이 나갔습니다.")
                 .actionType(GameActionType.LEAVE_TABLE)
                 .playerId(playerId)
                 .tableId(tableId)
