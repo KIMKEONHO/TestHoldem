@@ -176,6 +176,7 @@ function toActionBubbleText(result: ActionResult): string | null {
   }
   return label;
 }
+
 interface GameRoomProps {
   roomId: string;
   nickname: string;
@@ -225,12 +226,22 @@ export function GameRoom({
   };
 
 
+
   const showActionBubble = (result: ActionResult) => {
     const text = toActionBubbleText(result);
-    if (result.seatIndex == null || !text) return;
+    if (!text) return;
 
-    const seatIndex = Number(result.seatIndex);
+    const seatIndex = result.seatIndex != null
+      ? Number(result.seatIndex)
+      : (result.playerId != null
+        ? (tableState?.seats?.find((seat) => seat.player?.id === result.playerId)?.seatIndex ?? null)
+        : null);
+
+    if (seatIndex == null || Number.isNaN(seatIndex)) return;
+
     const mine = result.playerId != null && result.playerId === mySeatSnapshot?.player?.id;
+    if (mine) return;
+
     setSeatBubbles((prev) => ({
       ...prev,
       [seatIndex]: { text, mine },
@@ -248,7 +259,6 @@ export function GameRoom({
       delete bubbleTimersRef.current[seatIndex];
     }, 2000);
   };
-
   useEffect(() => {
     if (!isConnected || !roomId || !nickname) return;
 
@@ -731,41 +741,42 @@ export function GameRoom({
         .seat-stack { font-size: 0.8rem; opacity: 0.9; }
         .hole-cards { display: block; font-size: 0.75rem; margin-top: 2px; }
         .fold-label { font-size: 0.75rem; color: var(--text-muted); }
-
-        /* 하단 고정: 내 패 + 액션 버튼 */
-        .player-bar {
-          flex-shrink: 0;
-          background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
-          border-top: 1px solid rgba(56, 189, 248, 0.25);
-          padding: 12px 16px;
-          padding-bottom: max(12px, var(--safe-bottom));
-          box-shadow: 0 -4px 24px rgba(0,0,0,0.3);
+        .action-bubble {
+          display: inline-block;
+          margin-top: 4px;
+          padding: 2px 8px;
+          border-radius: 999px;
+          background: rgba(15, 23, 42, 0.9);
+          color: #f8fafc;
+          font-size: 0.74rem;
+          border: 1px solid rgba(255, 255, 255, 0.25);
+          animation: pop-bubble 0.16s ease-out;
         }
-        .my-hand-section {
-          text-align: center;
-          margin-bottom: 12px;
-          min-height: 52px;
+        .action-bubble.mine {
+          background: rgba(30, 64, 175, 0.9);
+          border-color: rgba(147, 197, 253, 0.7);
         }
-        .my-hand-label {
-          display: block;
-          font-size: 0.75rem;
-          color: var(--text-muted);
-          margin-bottom: 6px;
+        @keyframes pop-bubble {
+          from { transform: translateY(4px); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
         }
-        .my-hand-cards {
+        .actions {
           display: flex;
           justify-content: center;
           gap: 8px;
           align-items: center;
         }
-        .poker-card {
-          width: 48px;
-          height: 64px;
-          border-radius: 6px;
-          background: linear-gradient(145deg, #fff 0%, #e2e8f0 100%);
-          color: #1e293b;
-          font-size: 1rem;
-          font-weight: 700;
+        .act-btn {
+          padding: 8px 14px;
+          border-radius: var(--radius);
+          background: var(--accent);
+          color: var(--bg-dark);
+          font-weight: 600;
+          font-size: 0.85rem;
+        }
+        .act-btn:active { opacity: 0.9; }
+        .act-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+        .my-cards {
           display: flex;
           align-items: center;
           justify-content: center;
@@ -802,29 +813,19 @@ export function GameRoom({
           cursor: pointer;
           transition: transform 0.1s, box-shadow 0.2s;
         }
-        .action-btn:active { transform: scale(0.98); }
-        .action-btn:disabled {
-          opacity: 0.45;
-          cursor: not-allowed;
-          box-shadow: none;
+        .best-hand {
+          margin: 0 0 10px 0;
+          font-size: 0.9rem;
+          color: #fde68a;
         }
-        .action-btn.fold {
-          background: linear-gradient(135deg, #64748b 0%, #475569 100%);
-          box-shadow: 0 2px 12px rgba(100, 116, 139, 0.4);
+        .best-hand strong {
+          color: #fef3c7;
         }
-        .action-btn.raise {
-          background: linear-gradient(135deg, #0d9488 0%, #059669 100%);
-        }
-        .action-btn.allin {
-          background: linear-gradient(135deg, #b45309 0%, #d97706 100%);
-          box-shadow: 0 2px 12px rgba(217, 119, 6, 0.4);
-        }
-        .action-btn.start-hand {
-          width: 100%;
-          max-width: 200px;
-          margin: 0 auto;
-          background: linear-gradient(135deg, #059669 0%, #10b981 100%);
-          box-shadow: 0 2px 12px rgba(16, 185, 129, 0.4);
+        .card.my-card {
+          background: linear-gradient(135deg, #fff 0%, #e2e8f0 100%);
+          padding: 8px 12px;
+          font-size: 1rem;
+          font-weight: 600;
         }
         .waiting-turn {
           text-align: center;
