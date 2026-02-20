@@ -5,13 +5,8 @@ import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 @Data
-public class AuthRequest {
+public class FindIdRequest {
     @NotBlank
-    private String username;
-    @NotBlank
-    private String password;
-    private String displayName;
     @Email
     private String email;
-
 }

@@ -231,7 +231,6 @@ export function GameRoom({
     }
   };
 
-
   const addNotice = (text: string) => {
     const id = Date.now() + Math.floor(Math.random() * 1000);
     setNotices((prev) => [...prev, { id, text }].slice(-4));
@@ -1022,6 +1021,14 @@ export function GameRoom({
         .poker-card .card-suit {
           font-size: 1.1rem;
           line-height: 1;
+        }
+        .best-hand {
+          margin: 0 0 10px 0;
+          font-size: 0.9rem;
+          color: #fde68a;
+        }
+        .best-hand strong {
+          color: #fef3c7;
         }
         .best-hand {
           margin: 0 0 10px 0;
