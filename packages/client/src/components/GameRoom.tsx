@@ -147,33 +147,52 @@ function formatCard(cardCode: string): string {
   return `${rankPart}${suit}`;
 }
 
-function parseCardForDisplay(cardCode: string): string {
-  return formatCard(cardCode);
+/** 카드 코드 → { rank, suitChar, isRed } (카드 이미지용) */
+function parseCardForDisplay(code: string): { rank: string; suitChar: string; isRed: boolean } | null {
+  if (!code?.trim()) return null;
+  const c = code.trim().toLowerCase();
+  if (c.length < 2) return null;
+  const suit = c.slice(-1);
+  const rankRaw = c.slice(0, -1).toUpperCase();
+  const rankNum = rankRaw === 'A' ? 14 : rankRaw === 'K' ? 13 : rankRaw === 'Q' ? 12 : rankRaw === 'J' ? 11 : rankRaw === 'T' ? 10 : Number(rankRaw);
+  if (!['h', 'd', 'c', 's'].includes(suit) || Number.isNaN(rankNum) || rankNum < 2 || rankNum > 14) return null;
+  const rankMap: Record<number, string> = { 14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: '10', 9: '9', 8: '8', 7: '7', 6: '6', 5: '5', 4: '4', 3: '3', 2: '2' };
+  const suitChar = SUIT_SYMBOL[suit] ?? '';
+  const isRed = suit === 'h' || suit === 'd';
+  return { rank: rankMap[rankNum] ?? String(rankNum), suitChar, isRed };
 }
 
 
 
 function buildWinnerNotice(prev: TableSnapshot, next: TableSnapshot): string | null {
-  const prevPhase = prev.handState?.phase;
-  const nextPhase = next.handState?.phase;
+  const prevPhase = (prev.handState?.phase ?? '').toUpperCase();
+  const nextPhase = (next.handState?.phase ?? '').toUpperCase();
   if (prevPhase === 'WAITING' || nextPhase !== 'WAITING') return null;
 
-  let bestName: string | null = null;
   let bestDelta = 0;
+  const winners: { name: string; delta: number }[] = [];
   for (const nextSeat of next.seats ?? []) {
     if (!nextSeat.player) continue;
     const prevSeat = prev.seats?.find((s) => s.seatIndex === nextSeat.seatIndex);
     const prevStack = Number(prevSeat?.player?.stack ?? 0);
     const nextStack = Number(nextSeat.player.stack ?? 0);
     const delta = nextStack - prevStack;
-    if (delta > bestDelta) {
-      bestDelta = delta;
-      bestName = nextSeat.player.displayName;
+    if (delta > 0) {
+      if (delta > bestDelta) {
+        bestDelta = delta;
+        winners.length = 0;
+        winners.push({ name: nextSeat.player.displayName, delta });
+      } else if (delta === bestDelta) {
+        winners.push({ name: nextSeat.player.displayName, delta });
+      }
     }
   }
 
-  if (!bestName || bestDelta <= 0) return null;
-  return `${bestName} 승리! (+${bestDelta})`;
+  if (winners.length === 0) return null;
+  const names = winners.map((w) => w.name).join(', ');
+  return winners.length === 1
+    ? `${names} 승리! (+${bestDelta})`
+    : `${names} 공동 승리! (+${bestDelta} each)`;
 }
 function getSeatPosition(seatIndex: number, totalSeats: number) {
   const count = Math.max(totalSeats, 2);
@@ -242,6 +261,8 @@ export function GameRoom({
   const [joinTimeout, setJoinTimeout] = useState(false);
   const [seatBubbles, setSeatBubbles] = useState<Record<number, SeatActionBubble>>({});
   const [notices, setNotices] = useState<TableNotice[]>([]);
+  const [winnerBanner, setWinnerBanner] = useState<string | null>(null);
+  const winnerBannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bubbleTimersRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
   const prevTableStateRef = useRef<TableSnapshot | null>(null);
   const sendJoin = () => {
@@ -280,7 +301,15 @@ export function GameRoom({
     const prevState = prevTableStateRef.current;
     if (prevState) {
       const winnerNotice = buildWinnerNotice(prevState, nextState);
-      if (winnerNotice) addNotice(winnerNotice);
+      if (winnerNotice) {
+        addNotice(winnerNotice);
+        setWinnerBanner(winnerNotice);
+        if (winnerBannerTimerRef.current) clearTimeout(winnerBannerTimerRef.current);
+        winnerBannerTimerRef.current = setTimeout(() => {
+          setWinnerBanner(null);
+          winnerBannerTimerRef.current = null;
+        }, 5000);
+      }
     }
 
     prevTableStateRef.current = nextState;
@@ -399,6 +428,7 @@ export function GameRoom({
       clearTimeout(joinTimer);
       clearTimeout(timeoutTimer);
       clearTimeout(retryTimer);
+      if (winnerBannerTimerRef.current) clearTimeout(winnerBannerTimerRef.current);
       Object.values(bubbleTimersRef.current).forEach((timer) => clearTimeout(timer));
       bubbleTimersRef.current = {};
       // 구독 해제를 약간 지연해 Strict Mode에서 즉시 UNSUB 되는 것 방지
@@ -487,70 +517,54 @@ export function GameRoom({
       )}
 
       <div className="table-container">
-        <div className="poker-table">
-          <div className="table-surface">
-            {tableState ? (
-              <>
-                <p className="table-name">{tableState.tableName}</p>
-                <div className="pot">팟: {Number(tableState.handState?.pot ?? 0)}</div>
-                <div className="community-cards">
-                  {(tableState.handState?.communityCards ?? []).map((code, i) => (
-                    <span key={i} className="card">
-                      {parseCardForDisplay(code)}
-                    </span>
-                  ))}
-                </div>
-                <div className="phase">{tableState.handState?.phase ?? 'WAITING'}</div>
-                {mySeatSnapshot?.player?.holeCards && mySeatSnapshot.player.holeCards.length > 0 && (
-                  <div className="my-cards">
-                    <span className="my-cards-label">내 패:</span>
-                    {mySeatSnapshot.player.holeCards.map((code, i) => (
-                      <span key={i} className="card my-card">
-                        {parseCardForDisplay(code)}
-                      </span>
-                    ))}
+        <div className="game-table-wrap">
+          {/* 테이블 둘레에 앉은 좌석 (말풍선 + 아바타) */}
+          {(tableState?.seats ?? []).filter((s): s is SeatSnapshot => !!s.player).map((seat: SeatSnapshot) => {
+            const total = (tableState?.seats ?? []).filter((s) => s.player).length;
+            const pos = getSeatPosition(seat.seatIndex, Math.max(total, 1));
+            return (
+              <div
+                key={seat.seatIndex}
+                className={`seat-item ${seat.seatIndex === mySeatIndex ? 'me' : ''} ${seat.player.folded ? 'folded' : ''}`}
+                style={{ left: pos.left, top: pos.top }}
+              >
+                {seatBubbles[seat.seatIndex] && (
+                  <div className={`seat-bubble ${seatBubbles[seat.seatIndex].mine ? 'mine' : ''}`}>
+                    {seatBubbles[seat.seatIndex].text}
                   </div>
                 )}
-                {bestHandName && (
-                  <p className="best-hand">현재 최고 패: <strong>{bestHandName}</strong></p>
-                )}
-                {handState?.actingSeatIndex != null && (
-                  <p className="turn-info">
-                    {isMyTurn ? (
-                      <strong className="my-turn">당신의 턴입니다</strong>
-                    ) : (
-                      <>
-                        현재 턴: 시트 {handState.actingSeatIndex + 1}
-                        {tableState.seats?.find((s) => s.seatIndex === handState.actingSeatIndex)?.player && (
-                          <> ({tableState.seats.find((s) => s.seatIndex === handState.actingSeatIndex)?.player?.displayName})</>
-                        )}
-                      </>
-                    )}
-                  </p>
-                )}
-                <div className="seats">
-                  {(tableState.seats ?? []).map(
-                    (seat: SeatSnapshot) =>
-                      seat.player && (
-                        <div
-                          key={seat.seatIndex}
-                          className={`seat ${seat.seatIndex === mySeatIndex ? 'me' : ''} ${seat.player.folded ? 'folded' : ''}`}
-                          style={getSeatPosition(seat.seatIndex, tableState.seats.length)}
-                        >
-                          <span className="seat-name">시트 {seat.seatIndex + 1} · {seat.player.displayName}</span>
-                          <span className="seat-stack">{Number(seat.player.stack)}</span>
-                          {seatBubbles[seat.seatIndex] && (
-                            <span className={`action-bubble ${seatBubbles[seat.seatIndex].mine ? 'mine' : ''}`}>
-                              {seatBubbles[seat.seatIndex].text}
-                            </span>
-                          )}
-                          {seat.seatIndex === mySeatIndex && seat.player.holeCards?.length ? (
-                            <span className="hole-cards">
-                              {seat.player.holeCards.map((code) => parseCardForDisplay(code)).join(' ')}
-                            </span>
-                          ) : (
-                            seat.player.folded && <span className="fold-label">폴드</span>
-                          )}
+                <div className="seat-avatar" aria-hidden>
+                  <span className="seat-avatar-icon">👤</span>
+                </div>
+                <span className="seat-name">{seat.player.displayName}</span>
+                <span className="seat-stack">{Number(seat.player.stack)}</span>
+                {seat.player.folded && <span className="fold-label">폴드</span>}
+              </div>
+            );
+          })}
+          <div className="poker-table">
+            {winnerBanner && (
+              <div className="winner-banner" role="alert">
+                <span className="winner-banner-text">{winnerBanner}</span>
+              </div>
+            )}
+            <div className="table-surface">
+              {tableState ? (
+                <>
+                  <p className="table-name">{tableState.tableName}</p>
+                  <div className="pot">팟: {Number(tableState.handState?.pot ?? 0)}</div>
+                  <div className="community-cards">
+                    {(tableState.handState?.communityCards ?? []).map((code, i) => {
+                      const d = parseCardForDisplay(code);
+                      return d ? (
+                        <div key={i} className={`poker-card table-card ${d.isRed ? 'red' : 'black'}`}>
+                          <span className="card-rank">{d.rank}</span>
+                          <span className="card-suit">{d.suitChar}</span>
+                        </div>
+                      ) : (
+                        <div key={i} className="poker-card table-card black">
+                          <span className="card-rank">?</span>
+                          <span className="card-suit">?</span>
                         </div>
                       );
                     })}
@@ -570,67 +584,26 @@ export function GameRoom({
                       )}
                     </p>
                   )}
-                </div>
-                {handState?.phase !== 'WAITING' && (
-                  <>
-                    {isMyTurn && !amIFolded ? (
-                      <div className="actions">
-                        <button type="button" className="act-btn" onClick={() => sendAction('FOLD')}>
-                          폴드
-                        </button>
-                        <button type="button" className="act-btn" disabled={!canCheck} onClick={() => sendAction('CHECK')}>
-                          체크
-                        </button>
-                        <button type="button" className="act-btn" disabled={!canCall} onClick={() => sendAction('CALL')}>
-                          콜 {canCall ? toCall : ''}
-                        </button>
-                        <button
-                          type="button"
-                          className="act-btn"
-                          disabled={!canRaise}
-                          onClick={() => sendAction('RAISE', toCall + minRaise)}
-                        >
-                          최소 레이즈 {toCall + minRaise}
-                        </button>
-                        <button type="button" className="act-btn" disabled={myStack <= 0} onClick={() => sendAction('ALL_IN')}>
-                          올인
-                        </button>
-                      </div>
-                    ) : (
-                      <p className="waiting-turn">
-                        {amIFolded ? '폴드하셨습니다.' : '다른 플레이어의 턴을 기다리는 중…'}
-                      </p>
-                    )}
-                  </>
-                )}
-                {handState?.phase === 'WAITING' && mySeatIndex != null && (
-                  <button
-                    type="button"
-                    className="btn start-hand"
-                    onClick={() => sendAction('START_HAND')}
-                  >
-                    핸드 시작
-                  </button>
-                )}
-                {tableState && (!tableState.seats || tableState.seats.length === 0) && (
-                  <button type="button" className="btn start-hand" onClick={sendJoin}>
-                    상태 새로고침
-                  </button>
-                )}
-              </>
-            ) : (
-              <>
-                <p className="table-label">홀덤 테이블</p>
-                <p className="table-hint">
-                  {joinTimeout ? '입장 응답이 없습니다. 서버가 켜져 있는지 확인하고 재시도해 주세요.' : '입장 중…'}
-                </p>
-                {joinTimeout && (
-                  <button type="button" className="btn start-hand" onClick={sendJoin}>
-                    입장 재시도
-                  </button>
-                )}
-              </>
-            )}
+                  {tableState && (!tableState.seats || tableState.seats.length === 0) && (
+                    <button type="button" className="btn start-hand" onClick={sendJoin}>
+                      상태 새로고침
+                    </button>
+                  )}
+                </>
+              ) : (
+                <>
+                  <p className="table-label">홀덤 테이블</p>
+                  <p className="table-hint">
+                    {joinTimeout ? '입장 응답이 없습니다. 서버가 켜져 있는지 확인하고 재시도해 주세요.' : '입장 중…'}
+                  </p>
+                  {joinTimeout && (
+                    <button type="button" className="btn start-hand" onClick={sendJoin}>
+                      입장 재시도
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -870,9 +843,12 @@ export function GameRoom({
         }
         .poker-table {
           position: relative;
-          width: 100%;
-          max-width: 520px;
-          min-height: 320px;
+          width: 76%;
+          height: 76%;
+          max-width: 640px;
+          max-height: 460px;
+          min-width: 280px;
+          min-height: 280px;
           border-radius: 50%;
           background: var(--bg-table);
           border: clamp(8px, 1.8vw, 14px) solid #0a3d5c;
@@ -880,6 +856,31 @@ export function GameRoom({
           display: flex;
           align-items: center;
           justify-content: center;
+        }
+        .winner-banner {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          z-index: 10;
+          padding: 14px 28px;
+          background: linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(30, 58, 138, 0.96) 100%);
+          border: 2px solid var(--accent);
+          border-radius: 16px;
+          box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.1);
+          pointer-events: none;
+          animation: winner-pop 0.35s ease-out;
+        }
+        .winner-banner-text {
+          font-size: clamp(1rem, 3vw, 1.35rem);
+          font-weight: 800;
+          color: #fef3c7;
+          text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+          white-space: nowrap;
+        }
+        @keyframes winner-pop {
+          from { transform: translate(-50%, -50%) scale(0.7); opacity: 0; }
+          to { transform: translate(-50%, -50%) scale(1); opacity: 1; }
         }
         .table-surface {
           position: relative;
