@@ -570,7 +570,6 @@ export function GameRoom({
             </div>
           </div>
         </div>
-      </div>
 
       {/* 하단 고정: 내 패(카드 이미지) + 액션 버튼 */}
       <div className="player-bar">
