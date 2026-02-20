@@ -194,6 +194,57 @@ function buildWinnerNotice(prev: TableSnapshot, next: TableSnapshot): string | n
     ? `${names} 승리! (+${bestDelta})`
     : `${names} 공동 승리! (+${bestDelta} each)`;
 }
+
+type WinnerShowcasePlayer = {
+  seatIndex: number;
+  name: string;
+  cards: string[];
+  handName: string | null;
+  isWinner: boolean;
+};
+
+function buildWinnerShowcase(prev: TableSnapshot, next: TableSnapshot): WinnerShowcasePlayer[] {
+  const prevPhase = (prev.handState?.phase ?? '').toUpperCase();
+  const nextPhase = (next.handState?.phase ?? '').toUpperCase();
+  if (prevPhase === 'WAITING' || nextPhase !== 'WAITING') return [];
+
+  let bestDelta = 0;
+  const winnerSeatIndices = new Set<number>();
+  for (const nextSeat of next.seats ?? []) {
+    if (!nextSeat.player) continue;
+    const prevSeat = prev.seats?.find((s) => s.seatIndex === nextSeat.seatIndex);
+    const prevStack = Number(prevSeat?.player?.stack ?? 0);
+    const nextStack = Number(nextSeat.player.stack ?? 0);
+    const delta = nextStack - prevStack;
+    if (delta > 0) {
+      if (delta > bestDelta) {
+        bestDelta = delta;
+        winnerSeatIndices.clear();
+        winnerSeatIndices.add(nextSeat.seatIndex);
+      } else if (delta === bestDelta) {
+        winnerSeatIndices.add(nextSeat.seatIndex);
+      }
+    }
+  }
+
+  if (winnerSeatIndices.size === 0) return [];
+
+  const communityCards = prev.handState?.communityCards ?? next.handState?.communityCards ?? [];
+  return (next.seats ?? [])
+    .filter((seat): seat is SeatSnapshot => !!seat.player)
+    .map((seat) => {
+      const cards = (seat.player?.holeCards ?? []).filter(Boolean);
+      return {
+        seatIndex: seat.seatIndex,
+        name: seat.player!.displayName,
+        cards,
+        handName: cards.length > 0 ? getBestHandName(cards, communityCards) : null,
+        isWinner: winnerSeatIndices.has(seat.seatIndex),
+      };
+    })
+    .filter((player) => player.cards.length > 0);
+}
+
 function getSeatPosition(seatIndex: number, totalSeats: number) {
   const count = Math.max(totalSeats, 2);
   const angle = ((seatIndex / count) * (Math.PI * 2)) - (Math.PI / 2);
@@ -262,6 +313,7 @@ export function GameRoom({
   const [seatBubbles, setSeatBubbles] = useState<Record<number, SeatActionBubble>>({});
   const [notices, setNotices] = useState<TableNotice[]>([]);
   const [winnerBanner, setWinnerBanner] = useState<string | null>(null);
+  const [winnerShowcase, setWinnerShowcase] = useState<WinnerShowcasePlayer[]>([]);
   const winnerBannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bubbleTimersRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
   const prevTableStateRef = useRef<TableSnapshot | null>(null);
@@ -304,9 +356,11 @@ export function GameRoom({
       if (winnerNotice) {
         addNotice(winnerNotice);
         setWinnerBanner(winnerNotice);
+        setWinnerShowcase(buildWinnerShowcase(prevState, nextState));
         if (winnerBannerTimerRef.current) clearTimeout(winnerBannerTimerRef.current);
         winnerBannerTimerRef.current = setTimeout(() => {
           setWinnerBanner(null);
+          setWinnerShowcase([]);
           winnerBannerTimerRef.current = null;
         }, 5000);
       }
@@ -519,7 +573,8 @@ export function GameRoom({
       <div className="table-container">
         <div className="game-table-wrap">
           {/* 테이블 둘레에 앉은 좌석 (말풍선 + 아바타) */}
-          {(tableState?.seats ?? []).filter((s): s is SeatSnapshot => !!s.player).map((seat: SeatSnapshot) => {
+          {(tableState?.seats ?? []).map((seat: SeatSnapshot) => {
+            if (!seat.player) return null;
             const total = (tableState?.seats ?? []).filter((s) => s.player).length;
             const pos = getSeatPosition(seat.seatIndex, Math.max(total, 1));
             return (
@@ -546,6 +601,21 @@ export function GameRoom({
             {winnerBanner && (
               <div className="winner-banner" role="alert">
                 <span className="winner-banner-text">{winnerBanner}</span>
+                {winnerShowcase.length > 0 && (
+                  <div className="winner-showcase">
+                    {winnerShowcase.map((player) => (
+                      <div key={player.seatIndex} className={`winner-showcase-row ${player.isWinner ? 'winner' : ''}`}>
+                        <span className="winner-showcase-name">{player.name}</span>
+                        <span className="winner-showcase-cards">
+                          {player.cards.map((code, i) => (
+                            <span key={`${player.seatIndex}-${i}`} className="winner-showcase-card">{formatCard(code)}</span>
+                          ))}
+                        </span>
+                        {player.handName && <span className="winner-showcase-hand">{player.handName}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
             <div className="table-surface">
@@ -863,7 +933,7 @@ export function GameRoom({
           left: 50%;
           transform: translate(-50%, -50%);
           z-index: 10;
-          padding: 14px 28px;
+          padding: 14px 20px;
           background: linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(30, 58, 138, 0.96) 100%);
           border: 2px solid var(--accent);
           border-radius: 16px;
@@ -877,6 +947,47 @@ export function GameRoom({
           color: #fef3c7;
           text-shadow: 0 1px 2px rgba(0,0,0,0.4);
           white-space: nowrap;
+        }
+        .winner-showcase {
+          margin-top: 10px;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .winner-showcase-row {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 0.78rem;
+          color: #e2e8f0;
+          background: rgba(15, 23, 42, 0.6);
+          border: 1px solid rgba(255, 255, 255, 0.14);
+          border-radius: 8px;
+          padding: 4px 8px;
+        }
+        .winner-showcase-row.winner {
+          border-color: rgba(250, 204, 21, 0.6);
+          box-shadow: inset 0 0 0 1px rgba(250, 204, 21, 0.35);
+        }
+        .winner-showcase-name {
+          font-weight: 700;
+          min-width: 58px;
+        }
+        .winner-showcase-cards {
+          display: inline-flex;
+          gap: 4px;
+        }
+        .winner-showcase-card {
+          font-weight: 700;
+          color: #f8fafc;
+          background: rgba(30, 41, 59, 0.8);
+          border-radius: 4px;
+          padding: 1px 6px;
+        }
+        .winner-showcase-hand {
+          color: #fde68a;
+          font-weight: 700;
+          margin-left: auto;
         }
         @keyframes winner-pop {
           from { transform: translate(-50%, -50%) scale(0.7); opacity: 0; }
