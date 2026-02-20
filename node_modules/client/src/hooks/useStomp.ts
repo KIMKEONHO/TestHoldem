@@ -1,18 +1,39 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Client, IMessage } from '@stomp/stompjs';
+import { Client, IMessage, StompSubscription } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
 import { WS_URL } from '../config';
 
 type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
 
+type SubscriptionEntry = {
+  onMessage: (body: unknown) => void;
+  stompSub?: StompSubscription;
+};
+
 export function useStomp() {
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
   const [lastMessage, setLastMessage] = useState<unknown>(null);
   const clientRef = useRef<Client | null>(null);
-  const subscriptionsRef = useRef<Map<string, () => void>>(new Map());
+  const subscriptionsRef = useRef<Map<string, SubscriptionEntry>>(new Map());
+
+  const attachSubscription = useCallback((destination: string, entry: SubscriptionEntry) => {
+    const client = clientRef.current;
+    if (!client?.connected) return;
+
+    entry.stompSub?.unsubscribe();
+    entry.stompSub = client.subscribe(destination, (message: IMessage) => {
+      try {
+        const parsed = JSON.parse(message.body) as unknown;
+        setLastMessage(parsed);
+        entry.onMessage(parsed);
+      } catch {
+        entry.onMessage(message.body);
+      }
+    });
+  }, []);
 
   const connect = useCallback(() => {
-    if (clientRef.current?.connected) return;
+    if (clientRef.current?.active || clientRef.current?.connected) return;
 
     setConnectionState('connecting');
     const client = new Client({
@@ -20,18 +41,25 @@ export function useStomp() {
       reconnectDelay: 3000,
       heartbeatIncoming: 4000,
       heartbeatOutgoing: 4000,
-      onConnect: () => setConnectionState('connected'),
+      onConnect: () => {
+        setConnectionState('connected');
+        subscriptionsRef.current.forEach((entry, destination) => {
+          attachSubscription(destination, entry);
+        });
+      },
       onStompError: () => setConnectionState('error'),
       onWebSocketClose: () => setConnectionState('disconnected'),
     });
 
     client.activate();
     clientRef.current = client;
-  }, []);
+  }, [attachSubscription]);
 
   const disconnect = useCallback(() => {
-    subscriptionsRef.current.forEach((unsub) => unsub());
-    subscriptionsRef.current.clear();
+    subscriptionsRef.current.forEach((entry) => {
+      entry.stompSub?.unsubscribe();
+      entry.stompSub = undefined;
+    });
     clientRef.current?.deactivate();
     clientRef.current = null;
     setConnectionState('disconnected');
@@ -48,25 +76,17 @@ export function useStomp() {
   }, []);
 
   const subscribe = useCallback((destination: string, onMessage: (body: unknown) => void) => {
-    if (!clientRef.current?.connected) return () => {};
+    const entry: SubscriptionEntry = { onMessage };
+    subscriptionsRef.current.set(destination, entry);
+    attachSubscription(destination, entry);
 
-    const sub = clientRef.current.subscribe(destination, (message: IMessage) => {
-      try {
-        const parsed = JSON.parse(message.body) as unknown;
-        setLastMessage(parsed);
-        onMessage(parsed);
-      } catch {
-        onMessage(message.body);
-      }
-    });
-
-    const unsub = () => {
-      sub.unsubscribe();
+    return () => {
+      const current = subscriptionsRef.current.get(destination);
+      if (!current) return;
+      current.stompSub?.unsubscribe();
       subscriptionsRef.current.delete(destination);
     };
-    subscriptionsRef.current.set(destination, unsub);
-    return unsub;
-  }, []);
+  }, [attachSubscription]);
 
   useEffect(() => {
     return () => {
