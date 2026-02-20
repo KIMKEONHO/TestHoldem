@@ -1,3 +1,4 @@
+
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { APP_PREFIX, TOPIC_PREFIX, USER_QUEUE_TABLE_STATE } from '../config';
 import type {
@@ -146,8 +147,6 @@ function formatCard(cardCode: string): string {
   if (!suit || !rankPart) return trimmed;
   return `${rankPart}${suit}`;
 }
-
-
 
 type SeatActionBubble = {
   text: string;
@@ -545,6 +544,70 @@ export function GameRoom({
         </div>
       </div>
 
+      {/* 하단 고정: 내 패 + 액션 버튼 (참고 이미지 레이아웃) */}
+      <div className="player-bar">
+        <div className="my-hand-section">
+          {mySeatSnapshot?.player?.holeCards && mySeatSnapshot.player.holeCards.length > 0 ? (
+            <>
+              <span className="my-hand-label">내 패</span>
+              <div className="my-hand-cards">
+                {mySeatSnapshot.player.holeCards.map((code, i) => (
+                  <div key={i} className="poker-card">
+                    {formatCard(code)}
+                  </div>
+                ))}
+              </div>
+              {bestHandName && (
+                <span className="my-best-hand">{bestHandName}</span>
+              )}
+            </>
+          ) : (
+            handState?.phase !== 'WAITING' && !amIFolded && (
+              <span className="my-hand-placeholder">카드 배분 중…</span>
+            )
+          )}
+          {amIFolded && handState?.phase !== 'WAITING' && (
+            <span className="my-hand-folded">폴드</span>
+          )}
+        </div>
+        {handState?.phase !== 'WAITING' ? (
+          isMyTurn && !amIFolded ? (
+            <div className="action-bar">
+              <button type="button" className="action-btn fold" onClick={() => sendAction('FOLD')}>
+                다이
+              </button>
+              <button type="button" className="action-btn" disabled={!canCheck} onClick={() => sendAction('CHECK')}>
+                체크
+              </button>
+              <button type="button" className="action-btn" disabled={!canCall} onClick={() => sendAction('CALL')}>
+                콜 {canCall ? `(${toCall})` : ''}
+              </button>
+              <button
+                type="button"
+                className="action-btn raise"
+                disabled={!canRaise}
+                onClick={() => sendAction('RAISE', toCall + minRaise)}
+              >
+                레이즈
+              </button>
+              <button type="button" className="action-btn allin" disabled={myStack <= 0} onClick={() => sendAction('ALL_IN')}>
+                올인
+              </button>
+            </div>
+          ) : (
+            <p className="waiting-turn">
+              {amIFolded ? '폴드하셨습니다.' : '다른 플레이어의 턴을 기다리는 중…'}
+            </p>
+          )
+        ) : (
+          mySeatIndex != null && (
+            <button type="button" className="action-btn start-hand" onClick={() => sendAction('START_HAND')}>
+              핸드 시작
+            </button>
+          )
+        )}
+      </div>
+
       {!isConnected && (
         <div className="connection-lost">
           서버와 연결이 끊겼습니다. 로비에서 다시 연결해 주세요.
@@ -699,9 +762,9 @@ export function GameRoom({
         }
         .actions {
           display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
           justify-content: center;
+          gap: 8px;
+          align-items: center;
         }
         .act-btn {
           padding: 8px 14px;
@@ -717,12 +780,38 @@ export function GameRoom({
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 8px;
-          margin-bottom: 12px;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.2), 0 0 0 1px rgba(0,0,0,0.06);
         }
-        .my-cards-label {
+        .my-best-hand {
+          display: inline-block;
+          font-size: 0.8rem;
+          color: #fde68a;
+          margin-top: 4px;
+        }
+        .my-hand-placeholder, .my-hand-folded {
           font-size: 0.9rem;
-          font-weight: 600;
+          color: var(--text-muted);
+        }
+        .my-hand-folded { color: var(--danger); }
+        .action-bar {
+          display: flex;
+          gap: 8px;
+          justify-content: center;
+          flex-wrap: wrap;
+        }
+        .action-btn {
+          flex: 1;
+          min-width: 64px;
+          padding: 12px 10px;
+          border: none;
+          border-radius: 10px;
+          font-weight: 700;
+          font-size: 0.9rem;
+          color: #fff;
+          background: linear-gradient(135deg, #0d9488 0%, #0e7490 50%, #0369a1 100%);
+          box-shadow: 0 2px 12px rgba(6, 182, 212, 0.4);
+          cursor: pointer;
+          transition: transform 0.1s, box-shadow 0.2s;
         }
         .best-hand {
           margin: 0 0 10px 0;
@@ -739,9 +828,10 @@ export function GameRoom({
           font-weight: 600;
         }
         .waiting-turn {
+          text-align: center;
           font-size: 0.9rem;
-          opacity: 0.9;
-          margin: 8px 0 0 0;
+          color: var(--text-muted);
+          margin: 0;
         }
         .btn.start-hand {
           padding: 10px 20px;
