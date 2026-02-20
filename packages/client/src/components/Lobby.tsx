@@ -17,6 +17,7 @@ type AuthUser = {
   username: string;
   displayName: string;
   email?: string;
+
   token: string;
 };
 
@@ -37,7 +38,9 @@ export function Lobby({
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
+
   const [email, setEmail] = useState('');
+
   const [authMessage, setAuthMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -59,6 +62,7 @@ export function Lobby({
     setNickname(user.displayName);
     localStorage.setItem('holdup-auth', JSON.stringify(user));
   };
+
 
   const requestLogin = async () => {
     setAuthMessage(null);
@@ -87,6 +91,7 @@ export function Lobby({
   const requestSignup = async () => {
     setAuthMessage(null);
     const res = await fetch(`${API_BASE_URL}/api/auth/signup`, {
+
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -94,6 +99,7 @@ export function Lobby({
         password,
         displayName: (displayName || username).trim(),
         email,
+
       }),
     });
     const body = (await res.json()) as {
@@ -102,6 +108,7 @@ export function Lobby({
       token?: string;
       username?: string;
       displayName?: string;
+
       email?: string;
     };
 
@@ -155,6 +162,7 @@ export function Lobby({
     setPassword('');
     setDisplayName('');
     setEmail('');
+
     localStorage.removeItem('holdup-auth');
     setAuthMessage('로그아웃되었습니다.');
   };
@@ -189,6 +197,7 @@ export function Lobby({
       </header>
 
       <section className="auth-section">
+
         <h2>{mode === 'login' ? '로그인' : '회원가입'}</h2>
 
         {authUser ? (
@@ -285,6 +294,7 @@ export function Lobby({
         .auth-actions { display: flex; gap: 8px; flex-wrap: wrap; }
         .helper-actions { margin-top: 8px; display: flex; gap: 10px; }
         .link-btn { background: transparent; color: #93c5fd; text-decoration: underline; font-size: 0.85rem; }
+
         .auth-msg { margin: 8px 0 0 0; font-size: 0.85rem; color: #fef08a; }
         .auth-ok { margin: 0 0 8px 0; font-size: 0.9rem; color: var(--success); }
         .connection-section { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }

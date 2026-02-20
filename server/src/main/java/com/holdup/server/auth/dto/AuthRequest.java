@@ -13,4 +13,5 @@ public class AuthRequest {
     private String displayName;
     @Email
     private String email;
+
 }

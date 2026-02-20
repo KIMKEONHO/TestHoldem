@@ -32,6 +32,7 @@ public class AuthController {
         String displayName = (request.getDisplayName() == null || request.getDisplayName().isBlank())
                 ? request.getUsername()
                 : request.getDisplayName().trim();
+
         if (request.getEmail() == null || request.getEmail().isBlank()) {
             return ResponseEntity.badRequest().body(AuthResponse.builder().success(false).message("이메일은 필수입니다.").build());
         }
