@@ -11,9 +11,13 @@ interface LobbyProps {
   subscribe: (destination: string, onMessage: (body: unknown) => void) => () => void;
 }
 
+type AuthMode = 'login' | 'signup';
+
 type AuthUser = {
   username: string;
   displayName: string;
+  email?: string;
+
   token: string;
 };
 
@@ -26,6 +30,7 @@ export function Lobby({
   send,
   subscribe,
 }: LobbyProps) {
+  const [mode, setMode] = useState<AuthMode>('login');
   const [nickname, setNickname] = useState('');
   const [roomId, setRoomId] = useState('');
   const [greeting, setGreeting] = useState<string | null>(null);
@@ -33,6 +38,9 @@ export function Lobby({
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
+
+  const [email, setEmail] = useState('');
+
   const [authMessage, setAuthMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -55,15 +63,43 @@ export function Lobby({
     localStorage.setItem('holdup-auth', JSON.stringify(user));
   };
 
-  const requestAuth = async (path: '/signup' | '/login') => {
+
+  const requestLogin = async () => {
     setAuthMessage(null);
-    const res = await fetch(`${API_BASE_URL}/api/auth${path}`, {
+    const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const body = (await res.json()) as {
+      success?: boolean;
+      message?: string;
+      token?: string;
+      username?: string;
+      displayName?: string;
+      email?: string;
+    };
+
+    if (!res.ok || !body.success || !body.token || !body.username || !body.displayName) {
+      setAuthMessage(body.message ?? '로그인 실패');
+      return;
+    }
+    saveAuth({ token: body.token, username: body.username, displayName: body.displayName, email: body.email });
+    setAuthMessage('로그인 완료');
+  };
+
+  const requestSignup = async () => {
+    setAuthMessage(null);
+    const res = await fetch(`${API_BASE_URL}/api/auth/signup`, {
+
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         username,
         password,
-        displayName: displayName || username,
+        displayName: (displayName || username).trim(),
+        email,
+
       }),
     });
     const body = (await res.json()) as {
@@ -72,14 +108,52 @@ export function Lobby({
       token?: string;
       username?: string;
       displayName?: string;
+
+      email?: string;
     };
 
     if (!res.ok || !body.success || !body.token || !body.username || !body.displayName) {
-      setAuthMessage(body.message ?? '인증 요청 실패');
+      setAuthMessage(body.message ?? '회원가입 실패');
       return;
     }
-    saveAuth({ token: body.token, username: body.username, displayName: body.displayName });
-    setAuthMessage(path === '/signup' ? '회원가입 및 로그인 완료' : '로그인 완료');
+
+    saveAuth({ token: body.token, username: body.username, displayName: body.displayName, email: body.email });
+    setAuthMessage('회원가입 및 로그인 완료');
+    setMode('login');
+  };
+
+  const requestFindId = async () => {
+    setAuthMessage(null);
+    if (!email.trim()) {
+      setAuthMessage('ID 찾기를 위해 이메일을 입력해 주세요.');
+      return;
+    }
+    const res = await fetch(`${API_BASE_URL}/api/auth/find-id`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const body = (await res.json()) as { success?: boolean; message?: string };
+    setAuthMessage(body.message ?? (res.ok ? 'ID 조회 완료' : 'ID 조회 실패'));
+  };
+
+  const requestResetPassword = async () => {
+    setAuthMessage(null);
+    if (!username.trim() || !email.trim() || !password.trim()) {
+      setAuthMessage('비밀번호 재설정을 위해 아이디/이메일/새 비밀번호를 입력해 주세요.');
+      return;
+    }
+    const res = await fetch(`${API_BASE_URL}/api/auth/reset-password`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        username,
+        email,
+        newPassword: password,
+      }),
+    });
+    const body = (await res.json()) as { success?: boolean; message?: string };
+    setAuthMessage(body.message ?? (res.ok ? '비밀번호 재설정 완료' : '비밀번호 재설정 실패'));
   };
 
   const handleLogout = () => {
@@ -87,6 +161,8 @@ export function Lobby({
     setUsername('');
     setPassword('');
     setDisplayName('');
+    setEmail('');
+
     localStorage.removeItem('holdup-auth');
     setAuthMessage('로그아웃되었습니다.');
   };
@@ -105,7 +181,7 @@ export function Lobby({
 
   const handleEnterRoom = () => {
     if (!authUser) {
-      setAuthMessage('먼저 회원가입/로그인을 진행해 주세요.');
+      setAuthMessage('먼저 로그인해 주세요.');
       return;
     }
     const id = roomId.trim() || 'default-room';
@@ -121,7 +197,9 @@ export function Lobby({
       </header>
 
       <section className="auth-section">
-        <h2>계정</h2>
+
+        <h2>{mode === 'login' ? '로그인' : '회원가입'}</h2>
+
         {authUser ? (
           <>
             <p className="auth-ok">{authUser.displayName} ({authUser.username}) 로그인됨</p>
@@ -138,15 +216,36 @@ export function Lobby({
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="비밀번호" />
             </label>
             <label>
-              <span>표시 닉네임</span>
-              <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="테이블에서 보일 이름" />
+              <span>이메일</span>
+              <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.com" />
             </label>
+            {mode === 'signup' && (
+              <label>
+                <span>표시 닉네임</span>
+                <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="테이블 닉네임" />
+              </label>
+            )}
+
             <div className="auth-actions">
-              <button type="button" className="btn btn-primary" onClick={() => requestAuth('/signup')}>회원가입</button>
-              <button type="button" className="btn btn-secondary" onClick={() => requestAuth('/login')}>로그인</button>
+              {mode === 'login' ? (
+                <button type="button" className="btn btn-primary" onClick={requestLogin}>로그인</button>
+              ) : (
+                <button type="button" className="btn btn-primary" onClick={requestSignup}>회원가입 완료</button>
+              )}
+              <button type="button" className="btn btn-secondary" onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}>
+                {mode === 'login' ? '회원가입 페이지로 이동' : '로그인 페이지로 이동'}
+              </button>
             </div>
+
+            {mode === 'login' && (
+              <div className="helper-actions">
+                <button type="button" className="link-btn" onClick={requestFindId}>ID 찾기</button>
+                <button type="button" className="link-btn" onClick={requestResetPassword}>PW 찾기/재설정</button>
+              </div>
+            )}
           </>
         )}
+
         {authMessage && <p className="auth-msg">{authMessage}</p>}
       </section>
 
@@ -158,13 +257,9 @@ export function Lobby({
           {connectionState === 'error' && '연결 실패'}
         </div>
         {!isConnected ? (
-          <button type="button" className="btn btn-primary" onClick={handleConnect}>
-            서버 연결
-          </button>
+          <button type="button" className="btn btn-primary" onClick={handleConnect}>서버 연결</button>
         ) : (
-          <button type="button" className="btn btn-secondary" onClick={onDisconnect}>
-            연결 끊기
-          </button>
+          <button type="button" className="btn btn-secondary" onClick={onDisconnect}>연결 끊기</button>
         )}
       </section>
 
@@ -173,45 +268,33 @@ export function Lobby({
           <section className="form-section">
             <label>
               <span>닉네임</span>
-              <input
-                type="text"
-                value={nickname}
-                onChange={(e) => setNickname(e.target.value)}
-                placeholder="이름 입력"
-                maxLength={20}
-              />
+              <input type="text" value={nickname} onChange={(e) => setNickname(e.target.value)} placeholder="이름 입력" maxLength={20} />
             </label>
             <label>
               <span>방 코드 (없으면 새 방)</span>
-              <input
-                type="text"
-                value={roomId}
-                onChange={(e) => setRoomId(e.target.value)}
-                placeholder="방 ID 또는 비움"
-              />
+              <input type="text" value={roomId} onChange={(e) => setRoomId(e.target.value)} placeholder="방 ID 또는 비움" />
             </label>
-            <button type="button" className="btn btn-primary full" onClick={handleEnterRoom}>
-              입장하기
-            </button>
+            <button type="button" className="btn btn-primary full" onClick={handleEnterRoom}>입장하기</button>
           </section>
 
           <section className="test-section">
-            <button type="button" className="btn btn-secondary" onClick={handleTestHello}>
-              서버 테스트 (Hello)
-            </button>
+            <button type="button" className="btn btn-secondary" onClick={handleTestHello}>서버 테스트 (Hello)</button>
             {greeting && <p className="greeting">{greeting}</p>}
           </section>
         </>
       )}
 
       <style>{`
-        .lobby { max-width: 420px; margin: 0 auto; padding: 24px 16px; min-height: 100%; }
+        .lobby { max-width: 440px; margin: 0 auto; padding: 24px 16px; min-height: 100%; }
         .lobby-header { text-align: center; margin-bottom: 24px; }
         .lobby-header h1 { font-size: 1.75rem; margin: 0 0 4px 0; color: var(--text); }
         .subtitle { color: var(--text-muted); font-size: 0.9rem; margin: 0; }
         .auth-section { margin-bottom: 20px; padding: 12px; border: 1px solid var(--bg-card); border-radius: var(--radius); }
         .auth-section h2 { margin: 0 0 8px 0; font-size: 1rem; }
-        .auth-actions { display: flex; gap: 8px; }
+        .auth-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+        .helper-actions { margin-top: 8px; display: flex; gap: 10px; }
+        .link-btn { background: transparent; color: #93c5fd; text-decoration: underline; font-size: 0.85rem; }
+
         .auth-msg { margin: 8px 0 0 0; font-size: 0.85rem; color: #fef08a; }
         .auth-ok { margin: 0 0 8px 0; font-size: 0.9rem; color: var(--success); }
         .connection-section { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }

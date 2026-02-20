@@ -4,6 +4,16 @@ server:
 spring:
   application:
     name: holdup-server
+  datasource:
+    url: jdbc:h2:file:./data/holdupdb;AUTO_SERVER=TRUE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    show-sql: false
 
 # 홀덤 게임 설정
 holdup:
