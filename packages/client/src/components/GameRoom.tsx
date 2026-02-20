@@ -148,6 +148,20 @@ function formatCard(cardCode: string): string {
   return `${rankPart}${suit}`;
 }
 
+function parseCardForDisplay(cardCode: string): string {
+  return formatCard(cardCode);
+}
+
+function getSeatPosition(seatIndex: number, totalSeats: number) {
+  const count = Math.max(totalSeats, 2);
+  const angle = ((seatIndex / count) * (Math.PI * 2)) - (Math.PI / 2);
+  const radiusX = 44;
+  const radiusY = 38;
+  const x = 50 + Math.cos(angle) * radiusX;
+  const y = 50 + Math.sin(angle) * radiusY;
+  return { left: `${x}%`, top: `${y}%` };
+}
+
 type SeatActionBubble = {
   text: string;
   mine: boolean;
@@ -448,7 +462,7 @@ export function GameRoom({
                 <div className="community-cards">
                   {(tableState.handState?.communityCards ?? []).map((code, i) => (
                     <span key={i} className="card">
-                      {formatCard(code)}
+                      {parseCardForDisplay(code)}
                     </span>
                   ))}
                 </div>
@@ -458,7 +472,7 @@ export function GameRoom({
                     <span className="my-cards-label">내 패:</span>
                     {mySeatSnapshot.player.holeCards.map((code, i) => (
                       <span key={i} className="card my-card">
-                        {formatCard(code)}
+                        {parseCardForDisplay(code)}
                       </span>
                     ))}
                   </div>
@@ -487,6 +501,7 @@ export function GameRoom({
                         <div
                           key={seat.seatIndex}
                           className={`seat ${seat.seatIndex === mySeatIndex ? 'me' : ''} ${seat.player.folded ? 'folded' : ''}`}
+                          style={getSeatPosition(seat.seatIndex, tableState.seats.length)}
                         >
                           <span className="seat-name">시트 {seat.seatIndex + 1} · {seat.player.displayName}</span>
                           <span className="seat-stack">{Number(seat.player.stack)}</span>
@@ -497,7 +512,7 @@ export function GameRoom({
                           )}
                           {seat.seatIndex === mySeatIndex && seat.player.holeCards?.length ? (
                             <span className="hole-cards">
-                              {seat.player.holeCards.map((code) => formatCard(code)).join(' ')}
+                              {seat.player.holeCards.map((code) => parseCardForDisplay(code)).join(' ')}
                             </span>
                           ) : (
                             seat.player.folded && <span className="fold-label">폴드</span>
@@ -804,12 +819,10 @@ export function GameRoom({
           font-weight: 600;
         }
         .poker-table {
-          width: 76%;
-          height: 76%;
-          max-width: 640px;
-          max-height: 460px;
-          min-width: 280px;
-          min-height: 280px;
+          position: relative;
+          width: 100%;
+          max-width: 520px;
+          min-height: 320px;
           border-radius: 50%;
           background: var(--bg-table);
           border: clamp(8px, 1.8vw, 14px) solid #0a3d5c;
@@ -819,6 +832,8 @@ export function GameRoom({
           justify-content: center;
         }
         .table-surface {
+          position: relative;
+          z-index: 2;
           text-align: center;
           color: rgba(255,255,255,0.95);
           padding: clamp(12px, 2.5vw, 20px);
@@ -877,17 +892,19 @@ export function GameRoom({
           color: var(--success);
         }
         .seats {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
-          justify-content: center;
-          margin-bottom: 12px;
+          position: absolute;
+          inset: 0;
+          z-index: 3;
         }
         .seat {
+          position: absolute;
+          transform: translate(-50%, -50%);
+          min-width: 108px;
           padding: 6px 10px;
-          background: var(--bg-card);
+          background: rgba(15, 23, 42, 0.88);
           border-radius: var(--radius);
-          font-size: 0.85rem;
+          font-size: 0.82rem;
+          border: 1px solid rgba(255, 255, 255, 0.16);
         }
         .seat.me {
           border: 2px solid var(--accent);
@@ -1021,6 +1038,14 @@ export function GameRoom({
         .poker-card .card-suit {
           font-size: 1.1rem;
           line-height: 1;
+        }
+        .best-hand {
+          margin: 0 0 10px 0;
+          font-size: 0.9rem;
+          color: #fde68a;
+        }
+        .best-hand strong {
+          color: #fef3c7;
         }
         .best-hand {
           margin: 0 0 10px 0;
