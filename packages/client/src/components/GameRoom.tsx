@@ -148,27 +148,14 @@ function formatCard(cardCode: string): string {
   return `${rankPart}${suit}`;
 }
 
-/** 카드 코드 → { rank, suitChar, isRed } (카드 이미지용) */
-function parseCardForDisplay(code: string): { rank: string; suitChar: string; isRed: boolean } | null {
-  const p = parseCard(code);
-  if (!p) return null;
-  const rankMap: Record<number, string> = { 14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: '10', 9: '9', 8: '8', 7: '7', 6: '6', 5: '5', 4: '4', 3: '3', 2: '2' };
-  const suitChar = SUIT_SYMBOL[p.suit] ?? '';
-  const isRed = p.suit === 'h' || p.suit === 'd';
-  return { rank: rankMap[p.rank] ?? String(p.rank), suitChar, isRed };
-}
-
-/** 테이블 둘레에 앉을 좌석 위치 (각도 → x,y 비율). 최대 9석. */
-function getSeatPosition(seatIndex: number, total: number): { x: number; y: number } {
-  if (total <= 0) return { x: 0.5, y: 0.5 };
-  const angle = (seatIndex / total) * 2 * Math.PI - Math.PI / 2;
-  const r = 0.48;
-  return { x: 0.5 + r * Math.cos(angle), y: 0.5 + r * Math.sin(angle) };
-}
-
 type SeatActionBubble = {
   text: string;
   mine: boolean;
+};
+
+type TableNotice = {
+  id: number;
+  text: string;
 };
 
 const ACTION_LABEL: Partial<Record<GameActionType, string>> = {
@@ -217,6 +204,9 @@ export function GameRoom({
   const [mySeatIndex, setMySeatIndex] = useState<number | null>(null);
   const [joinTimeout, setJoinTimeout] = useState(false);
   const [seatBubbles, setSeatBubbles] = useState<Record<number, SeatActionBubble>>({});
+
+  const [notices, setNotices] = useState<TableNotice[]>([]);
+
   const bubbleTimersRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
 
   const sendJoin = () => {
@@ -243,7 +233,13 @@ export function GameRoom({
     }
   };
 
-
+  const addNotice = (text: string) => {
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    setNotices((prev) => [...prev, { id, text }].slice(-4));
+    setTimeout(() => {
+      setNotices((prev) => prev.filter((n) => n.id !== id));
+    }, 2500);
+  };
 
   const showActionBubble = (result: ActionResult) => {
     const text = toActionBubbleText(result);
@@ -287,6 +283,12 @@ export function GameRoom({
       try {
         const res = typeof body === 'string' ? (JSON.parse(body) as ActionResult) : (body as ActionResult);
         showActionBubble(res);
+        if (res.actionType === 'LEAVE_TABLE' && res.success) {
+          const leavingName = res.seatIndex != null
+            ? tableState?.seats?.find((seat) => seat.seatIndex === res.seatIndex)?.player?.displayName
+            : null;
+          addNotice(res.message ?? `${leavingName ?? '플레이어'} 님이 나갔습니다.`);
+        }
         if (res.payload?.tableState) {
           setTableState(res.payload.tableState);
           syncMySeatIndex(res.payload.tableState);
@@ -430,56 +432,43 @@ export function GameRoom({
         </div>
       )}
 
+      {notices.length > 0 && (
+        <div className="table-notices">
+          {notices.map((notice) => (
+            <p key={notice.id} className="table-notice">{notice.text}</p>
+          ))}
+        </div>
+      )}
+
       <div className="table-container">
-        <div className="game-table-wrap">
-          {/* 테이블 둘레에 좌석 (사람 형체 + 말풍선) */}
-          {(tableState?.seats ?? []).filter((s): s is SeatSnapshot => !!s.player).map((seat: SeatSnapshot) => {
-            const total = (tableState?.seats ?? []).filter((s) => s.player).length;
-            const pos = getSeatPosition(seat.seatIndex, Math.max(total, 1));
-            return (
-              <div
-                key={seat.seatIndex}
-                className={`seat-item ${seat.seatIndex === mySeatIndex ? 'me' : ''} ${seat.player!.folded ? 'folded' : ''}`}
-                style={{ left: `${pos.x * 100}%`, top: `${pos.y * 100}%` }}
-              >
-                {seatBubbles[seat.seatIndex] && (
-                  <div className={`seat-bubble ${seatBubbles[seat.seatIndex].mine ? 'mine' : ''}`}>
-                    {seatBubbles[seat.seatIndex].text}
+        <div className="poker-table">
+          <div className="table-surface">
+            {tableState ? (
+              <>
+                <p className="table-name">{tableState.tableName}</p>
+                <div className="pot">팟: {Number(tableState.handState?.pot ?? 0)}</div>
+                <div className="community-cards">
+                  {(tableState.handState?.communityCards ?? []).map((code, i) => (
+                    <span key={i} className="card">
+                      {formatCard(code)}
+                    </span>
+                  ))}
+                </div>
+                <div className="phase">{tableState.handState?.phase ?? 'WAITING'}</div>
+                {mySeatSnapshot?.player?.holeCards && mySeatSnapshot.player.holeCards.length > 0 && (
+                  <div className="my-cards">
+                    <span className="my-cards-label">내 패:</span>
+                    {mySeatSnapshot.player.holeCards.map((code, i) => (
+                      <span key={i} className="card my-card">
+                        {formatCard(code)}
+                      </span>
+                    ))}
                   </div>
                 )}
-                <div className="seat-avatar" aria-hidden>
-                  <span className="seat-avatar-icon">👤</span>
-                </div>
-                <span className="seat-name">{seat.player!.displayName}</span>
-                <span className="seat-stack">{Number(seat.player!.stack)}</span>
-                {seat.player!.folded && <span className="fold-label">폴드</span>}
-              </div>
-            );
-          })}
-          <div className="poker-table">
-            <div className="table-surface">
-              {tableState ? (
-                <>
-                  <p className="table-name">{tableState.tableName}</p>
-                  <div className="pot">팟: {Number(tableState.handState?.pot ?? 0)}</div>
-                  <div className="community-cards">
-                    {(tableState.handState?.communityCards ?? []).map((code, i) => {
-                      const d = parseCardForDisplay(code);
-                      return d ? (
-                        <div key={i} className={`poker-card table-card ${d.isRed ? 'red' : 'black'}`}>
-                          <span className="card-rank">{d.rank}</span>
-                          <span className="card-suit">{d.suitChar}</span>
-                        </div>
-                      ) : (
-                        <div key={i} className="poker-card table-card black">
-                          <span className="card-rank">?</span>
-                          <span className="card-suit">?</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div className="phase">{tableState.handState?.phase ?? 'WAITING'}</div>
-                  {handState?.actingSeatIndex != null && (
+                {bestHandName && (
+                  <p className="best-hand">현재 최고 패: <strong>{bestHandName}</strong></p>
+                )}
+                {handState?.actingSeatIndex != null && (
                   <p className="turn-info">
                     {isMyTurn ? (
                       <strong className="my-turn">당신의 턴입니다</strong>
@@ -492,6 +481,73 @@ export function GameRoom({
                       </>
                     )}
                   </p>
+                )}
+                <div className="seats">
+                  {(tableState.seats ?? []).map(
+                    (seat: SeatSnapshot) =>
+                      seat.player && (
+                        <div
+                          key={seat.seatIndex}
+                          className={`seat ${seat.seatIndex === mySeatIndex ? 'me' : ''} ${seat.player.folded ? 'folded' : ''}`}
+                        >
+                          <span className="seat-name">시트 {seat.seatIndex + 1} · {seat.player.displayName}</span>
+                          <span className="seat-stack">{Number(seat.player.stack)}</span>
+                          {seatBubbles[seat.seatIndex] && (
+                            <span className={`action-bubble ${seatBubbles[seat.seatIndex].mine ? 'mine' : ''}`}>
+                              {seatBubbles[seat.seatIndex].text}
+                            </span>
+                          )}
+                          {seat.seatIndex === mySeatIndex && seat.player.holeCards?.length ? (
+                            <span className="hole-cards">
+                              {seat.player.holeCards.map((code) => formatCard(code)).join(' ')}
+                            </span>
+                          ) : (
+                            seat.player.folded && <span className="fold-label">폴드</span>
+                          )}
+                        </div>
+                      )
+                  )}
+                </div>
+                {handState?.phase !== 'WAITING' && (
+                  <>
+                    {isMyTurn && !amIFolded ? (
+                      <div className="actions">
+                        <button type="button" className="act-btn" onClick={() => sendAction('FOLD')}>
+                          폴드
+                        </button>
+                        <button type="button" className="act-btn" disabled={!canCheck} onClick={() => sendAction('CHECK')}>
+                          체크
+                        </button>
+                        <button type="button" className="act-btn" disabled={!canCall} onClick={() => sendAction('CALL')}>
+                          콜 {canCall ? toCall : ''}
+                        </button>
+                        <button
+                          type="button"
+                          className="act-btn"
+                          disabled={!canRaise}
+                          onClick={() => sendAction('RAISE', toCall + minRaise)}
+                        >
+                          최소 레이즈 {toCall + minRaise}
+                        </button>
+                        <button type="button" className="act-btn" disabled={myStack <= 0} onClick={() => sendAction('ALL_IN')}>
+                          올인
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="waiting-turn">
+                        {amIFolded ? '폴드하셨습니다.' : '다른 플레이어의 턴을 기다리는 중…'}
+                      </p>
+                    )}
+                  </>
+                )}
+                {handState?.phase === 'WAITING' && mySeatIndex != null && (
+                  <button
+                    type="button"
+                    className="btn start-hand"
+                    onClick={() => sendAction('START_HAND')}
+                  >
+                    핸드 시작
+                  </button>
                 )}
                 {tableState && (!tableState.seats || tableState.seats.length === 0) && (
                   <button type="button" className="btn start-hand" onClick={sendJoin}>
@@ -633,6 +689,21 @@ export function GameRoom({
           background: var(--danger);
           color: #fff;
           font-size: 0.9rem;
+        }
+        .table-notices {
+          padding: 8px 16px 0;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .table-notice {
+          margin: 0;
+          padding: 6px 10px;
+          border-radius: var(--radius);
+          background: rgba(15, 23, 42, 0.9);
+          color: #f8fafc;
+          font-size: 0.82rem;
+          border: 1px solid rgba(255, 255, 255, 0.2);
         }
         .table-container {
           flex: 1;
@@ -953,6 +1024,14 @@ export function GameRoom({
         .poker-card .card-suit {
           font-size: 1.1rem;
           line-height: 1;
+        }
+        .best-hand {
+          margin: 0 0 10px 0;
+          font-size: 0.9rem;
+          color: #fde68a;
+        }
+        .best-hand strong {
+          color: #fef3c7;
         }
         .card.my-card {
           background: linear-gradient(135deg, #fff 0%, #e2e8f0 100%);
