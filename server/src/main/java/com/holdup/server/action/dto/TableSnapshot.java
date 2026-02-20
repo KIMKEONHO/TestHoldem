@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 클라이언트에 브로드캐스트할 테이블 상태 스냅샷.
@@ -59,5 +60,9 @@ public class TableSnapshot {
         private BigDecimal currentBet;
         private Integer actingSeatIndex;
         private BigDecimal minRaise;
+        /** 이번 핸드에 참여한 시트 인덱스. */
+        private Set<Integer> inHandSeatIndices;
+        /** 이번 핸드에 참여한 플레이어 ID (도중 입장·같은 자리 새 플레이어 제외). 클라이언트 amIInHand 판단용. */
+        private Set<String> inHandPlayerIds;
     }
 }

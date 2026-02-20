@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -22,9 +23,19 @@ import java.util.stream.Collectors;
 public class TableSnapshotService {
 
     /**
-     * @param viewerPlayerId 본인 holeCards를 넣을 플레이어 ID. null이면 모든 플레이어 holeCards 미포함(브로드캐스트용).
+     * 쇼다운 시 모든 참여 플레이어의 holeCards를 포함한 스냅샷.
+     * phase는 테이블 현재 phase(SHOWDOWN) 그대로 사용.
      */
-    public TableSnapshot toSnapshot(Table table, String viewerPlayerId) {
+    public TableSnapshot toSnapshotWithShowdownCards(Table table) {
+        if (table == null) return null;
+        return toSnapshot(table, null, true);
+    }
+
+    /**
+     * @param viewerPlayerId 본인 holeCards를 넣을 플레이어 ID. null이면 모든 플레이어 holeCards 미포함(브로드캐스트용).
+     * @param includeAllHoleCards true면 쇼다운으로 모든 플레이어의 holeCards 포함.
+     */
+    public TableSnapshot toSnapshot(Table table, String viewerPlayerId, boolean includeAllHoleCards) {
         if (table == null) return null;
 
         List<TableSnapshot.SeatSnapshot> seats = new ArrayList<>();
@@ -36,7 +47,7 @@ public class TableSnapshotService {
                             .build()
                     : TableSnapshot.SeatSnapshot.builder()
                             .seatIndex(seat.getSeatIndex())
-                            .player(toPlayerSnapshot(seat.getPlayer(), viewerPlayerId))
+                            .player(toPlayerSnapshot(seat.getPlayer(), viewerPlayerId, includeAllHoleCards))
                             .build();
             seats.add(ss);
         }
@@ -46,6 +57,8 @@ public class TableSnapshotService {
                 .map(Card::toString)
                 .collect(Collectors.toList());
 
+        Set<Integer> inHandSeatIndices = hs.getSeatIndicesInHand();
+        var inHandPlayerIds = hs.getPlayerIdsInHand();
         TableSnapshot.HandStateSnapshot handStateSnapshot = TableSnapshot.HandStateSnapshot.builder()
                 .phase(hs.getPhase() != null ? hs.getPhase().name() : GamePhase.WAITING.name())
                 .communityCards(communityCards)
@@ -53,6 +66,8 @@ public class TableSnapshotService {
                 .currentBet(hs.getCurrentBet() != null ? hs.getCurrentBet() : BigDecimal.ZERO)
                 .actingSeatIndex(hs.getActingSeatIndex())
                 .minRaise(hs.getMinRaise() != null ? hs.getMinRaise() : BigDecimal.ZERO)
+                .inHandSeatIndices(inHandSeatIndices)
+                .inHandPlayerIds(inHandPlayerIds)
                 .build();
 
         return TableSnapshot.builder()
@@ -65,11 +80,20 @@ public class TableSnapshotService {
                 .build();
     }
 
-    private TableSnapshot.PlayerSnapshot toPlayerSnapshot(Player p, String viewerPlayerId) {
+    /**
+     * @param viewerPlayerId 본인 holeCards를 넣을 플레이어 ID. null이면 모든 플레이어 holeCards 미포함(브로드캐스트용).
+     */
+    public TableSnapshot toSnapshot(Table table, String viewerPlayerId) {
+        return toSnapshot(table, viewerPlayerId, false);
+    }
+
+    private TableSnapshot.PlayerSnapshot toPlayerSnapshot(Player p, String viewerPlayerId, boolean includeAllHoleCards) {
         if (p == null) return null;
-        boolean isViewer = p.getId() != null && p.getId().equals(viewerPlayerId);
+        boolean isViewer = viewerPlayerId != null && p.getId() != null && p.getId().equals(viewerPlayerId);
         List<String> holeCards = null;
-        if (isViewer && p.getHoleCards() != null) {
+        if (includeAllHoleCards && p.getHoleCards() != null && !p.getHoleCards().isEmpty()) {
+            holeCards = p.getHoleCards().stream().map(Card::toString).collect(Collectors.toList());
+        } else if (isViewer && p.getHoleCards() != null) {
             holeCards = p.getHoleCards().stream().map(Card::toString).collect(Collectors.toList());
         }
         return TableSnapshot.PlayerSnapshot.builder()

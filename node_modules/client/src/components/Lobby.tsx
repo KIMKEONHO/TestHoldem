@@ -1,5 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { API_BASE_URL, APP_PREFIX, TOPIC_PREFIX } from '../config';
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function isValidEmailFormat(value: string): boolean {
+  return EMAIL_REGEX.test((value || '').trim());
+}
+function getPasswordError(value: string): string | null {
+  if (!value || value.length < 8) return '비밀번호는 최소 8자 이상이어야 합니다.';
+  if (!/[a-z]/.test(value)) return '비밀번호에 영어 소문자를 포함해 주세요.';
+  if (!/[0-9]/.test(value)) return '비밀번호에 숫자를 포함해 주세요.';
+  return null;
+}
 
 interface LobbyProps {
   isConnected: boolean;
@@ -39,6 +50,7 @@ export function Lobby({
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [authMessage, setAuthMessage] = useState<string | null>(null);
+  const [emailCheckStatus, setEmailCheckStatus] = useState<'idle' | 'checking' | 'taken' | 'available'>('idle');
 
   useEffect(() => {
     const raw = localStorage.getItem('holdup-auth');
@@ -53,6 +65,49 @@ export function Lobby({
       localStorage.removeItem('holdup-auth');
     }
   }, []);
+
+  const signupErrors = useMemo(() => {
+    if (mode !== 'signup') return { username: null, password: null, email: null, displayName: null };
+    const u = (username || '').trim();
+    const e = (email || '').trim();
+    const d = (displayName || '').trim();
+    return {
+      username: !u ? '아이디를 입력해 주세요.' : null,
+      password: getPasswordError(password),
+      email: !e ? '이메일을 입력해 주세요.' : !isValidEmailFormat(e) ? '올바른 이메일 형식이 아닙니다.' : emailCheckStatus === 'taken' ? '이미 사용 중인 이메일입니다.' : null,
+      displayName: !d ? '표시 닉네임을 입력해 주세요.' : null,
+    };
+  }, [mode, username, password, email, displayName, emailCheckStatus]);
+
+  const checkEmailAvailable = useCallback(async (emailVal: string) => {
+    const trimmed = (emailVal || '').trim().toLowerCase();
+    if (!trimmed || !isValidEmailFormat(trimmed)) {
+      setEmailCheckStatus('idle');
+      return;
+    }
+    setEmailCheckStatus('checking');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/auth/check-email?email=${encodeURIComponent(trimmed)}`);
+      const data = (await res.json()) as { taken?: boolean };
+      setEmailCheckStatus(data.taken ? 'taken' : 'available');
+    } catch {
+      setEmailCheckStatus('idle');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (mode !== 'signup') {
+      setEmailCheckStatus('idle');
+      return;
+    }
+    const trimmed = (email || '').trim();
+    if (!trimmed || !isValidEmailFormat(trimmed)) {
+      setEmailCheckStatus('idle');
+      return;
+    }
+    const t = setTimeout(() => checkEmailAvailable(email), 400);
+    return () => clearTimeout(t);
+  }, [mode, email, checkEmailAvailable]);
 
   const saveAuth = (user: AuthUser) => {
     setAuthUser(user);
@@ -86,6 +141,7 @@ export function Lobby({
 
   const requestSignup = async () => {
     setAuthMessage(null);
+    if (signupErrors.username || signupErrors.password || signupErrors.email || signupErrors.displayName) return;
     const res = await fetch(`${API_BASE_URL}/api/auth/signup`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -171,12 +227,16 @@ export function Lobby({
     send(`${APP_PREFIX}/hello`, { name: nickname || 'Guest' });
   };
 
+  const generateRandomRoomCode = () => {
+    return String(100000 + Math.floor(Math.random() * 900000));
+  };
+
   const handleEnterRoom = () => {
     if (!authUser) {
       setAuthMessage('먼저 로그인해 주세요.');
       return;
     }
-    const id = roomId.trim() || 'default-room';
+    const id = roomId.trim() || generateRandomRoomCode();
     const name = (nickname.trim() || authUser.displayName).trim();
     onEnterRoom(id, name);
   };
@@ -200,28 +260,71 @@ export function Lobby({
           <>
             <label>
               <span>아이디</span>
-              <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="아이디" />
+              <input
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="아이디"
+                className={mode === 'signup' && signupErrors.username ? 'input-error' : ''}
+              />
+              {mode === 'signup' && signupErrors.username && <span className="field-error">{signupErrors.username}</span>}
             </label>
             <label>
               <span>비밀번호</span>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="비밀번호" />
-            </label>
-            <label>
-              <span>이메일</span>
-              <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.com" />
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="비밀번호"
+                className={mode === 'signup' && signupErrors.password ? 'input-error' : ''}
+              />
+              {mode === 'signup' && signupErrors.password && <span className="field-error">{signupErrors.password}</span>}
             </label>
             {mode === 'signup' && (
               <label>
+                <span>이메일</span>
+                <input
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="email@example.com"
+                  className={signupErrors.email ? 'input-error' : ''}
+                />
+                {signupErrors.email && <span className="field-error">{signupErrors.email}</span>}
+                {emailCheckStatus === 'checking' && <span className="field-hint">이메일 확인 중…</span>}
+                {emailCheckStatus === 'available' && !signupErrors.email && <span className="field-ok">사용 가능한 이메일입니다.</span>}
+              </label>
+            )}
+            {mode === 'signup' && (
+              <label>
                 <span>표시 닉네임</span>
-                <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="테이블 닉네임" />
+                <input
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder="테이블 닉네임"
+                  className={signupErrors.displayName ? 'input-error' : ''}
+                />
+                {signupErrors.displayName && <span className="field-error">{signupErrors.displayName}</span>}
               </label>
             )}
 
             <div className="auth-actions">
               {mode === 'login' ? (
-                <button type="button" className="btn btn-primary" onClick={requestLogin}>로그인</button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={requestLogin}
+                  disabled={!username.trim() || !password}
+                >
+                  로그인
+                </button>
               ) : (
-                <button type="button" className="btn btn-primary" onClick={requestSignup}>회원가입 완료</button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={requestSignup}
+                  disabled={!!(signupErrors.username || signupErrors.password || signupErrors.email || signupErrors.displayName)}
+                >
+                  회원가입 완료
+                </button>
               )}
               <button type="button" className="btn btn-secondary" onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}>
                 {mode === 'login' ? '회원가입 페이지로 이동' : '로그인 페이지로 이동'}
@@ -265,7 +368,15 @@ export function Lobby({
             </label>
             <label>
               <span>방 코드 (없으면 새 방)</span>
-              <input type="text" value={roomId} onChange={(e) => setRoomId(e.target.value)} placeholder="방 ID 또는 비움" />
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                value={roomId}
+                onChange={(e) => setRoomId(e.target.value.replace(/\D/g, ''))}
+                placeholder="숫자만 입력 또는 비워두기"
+                maxLength={12}
+              />
             </label>
             <button type="button" className="btn btn-primary full" onClick={handleEnterRoom}>입장하기</button>
           </section>
@@ -300,7 +411,11 @@ export function Lobby({
         label { display: block; margin-bottom: 12px; }
         label span { display: block; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 4px; }
         input { width: 100%; padding: 12px; border-radius: var(--radius); border: 1px solid var(--bg-card); background: var(--bg-card); color: var(--text); }
+        input.input-error { border-color: var(--danger); box-shadow: 0 0 0 1px var(--danger); }
         input::placeholder { color: var(--text-muted); }
+        .field-error { display: block; font-size: 0.8rem; color: #fca5a5; margin-top: 4px; }
+        .field-hint { display: block; font-size: 0.8rem; color: var(--text-muted); margin-top: 4px; }
+        .field-ok { display: block; font-size: 0.8rem; color: var(--success); margin-top: 4px; }
         .btn { padding: 10px 16px; border-radius: var(--radius); font-weight: 600; transition: opacity 0.2s; }
         .btn:active { opacity: 0.9; }
         .btn-primary { background: var(--accent); color: var(--bg-dark); }

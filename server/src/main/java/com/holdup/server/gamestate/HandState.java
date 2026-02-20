@@ -5,8 +5,10 @@ import com.holdup.server.card.Card;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -30,6 +32,10 @@ public class HandState {
     private BigDecimal minRaise;
     /** 이번 스트릿에서 첫 액션한 시트 인덱스 (스트릿 종료 판단용). */
     private int firstActingSeatIndexThisStreet;
+    /** 이번 핸드에 참여한 시트 인덱스 (핸드 시작 시점에 착석한 플레이어만). */
+    private Set<Integer> seatIndicesInHand;
+    /** 이번 핸드에 참여한 플레이어 ID (핸드 시작 시점 착석자만). 도중 입장/같은 자리 새 플레이어는 제외. */
+    private Set<String> playerIdsInHand;
 
     public HandState() {
         this.phase = GamePhase.WAITING;
@@ -41,6 +47,24 @@ public class HandState {
         this.actingSeatIndex = 0;
         this.minRaise = BigDecimal.ZERO;
         this.firstActingSeatIndexThisStreet = 0;
+        this.seatIndicesInHand = new HashSet<>();
+        this.playerIdsInHand = new HashSet<>();
+    }
+
+    public Set<Integer> getSeatIndicesInHand() {
+        return seatIndicesInHand == null ? Set.of() : Collections.unmodifiableSet(seatIndicesInHand);
+    }
+
+    public void setSeatIndicesInHand(Set<Integer> indices) {
+        this.seatIndicesInHand = indices != null ? new HashSet<>(indices) : new HashSet<>();
+    }
+
+    public Set<String> getPlayerIdsInHand() {
+        return playerIdsInHand == null ? Set.of() : Collections.unmodifiableSet(playerIdsInHand);
+    }
+
+    public void setPlayerIdsInHand(Set<String> ids) {
+        this.playerIdsInHand = ids != null ? new HashSet<>(ids) : new HashSet<>();
     }
 
     public GamePhase getPhase() {

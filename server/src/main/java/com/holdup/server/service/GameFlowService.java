@@ -1,5 +1,7 @@
 package com.holdup.server.service;
 
+import com.holdup.server.action.dto.ActionResult;
+import com.holdup.server.action.dto.TableSnapshot;
 import com.holdup.server.deck.DeckFactory;
 import com.holdup.server.gamestate.GamePhase;
 import com.holdup.server.gamestate.HandState;
@@ -11,13 +13,18 @@ import com.holdup.server.table.Seat;
 import com.holdup.server.table.Table;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 한 핸드 시작·스트릿 전환·쇼다운·팟 분배를 담당.
@@ -27,13 +34,18 @@ public class GameFlowService {
 
     private final TableManager tableManager;
     private final WinnerResolver winnerResolver;
+    private final TableSnapshotService tableSnapshotService;
+    private final SimpMessagingTemplate messagingTemplate;
 
     @Value("${holdup.game.min-players-to-start:2}")
     private int minPlayersToStart;
 
-    public GameFlowService(TableManager tableManager, WinnerResolver winnerResolver) {
+    public GameFlowService(TableManager tableManager, WinnerResolver winnerResolver,
+                           TableSnapshotService tableSnapshotService, SimpMessagingTemplate messagingTemplate) {
         this.tableManager = tableManager;
         this.winnerResolver = winnerResolver;
+        this.tableSnapshotService = tableSnapshotService;
+        this.messagingTemplate = messagingTemplate;
     }
 
     /**
@@ -68,6 +80,15 @@ public class GameFlowService {
         // 딜러/SB/BB 결정: 기존 딜러 다음 착석자부터 순서 [SB, BB, UTG, ...]
         List<Integer> order = table.getOccupiedSeatIndicesInOrder(state.getDealerSeatIndex() + 1);
         if (order.size() < 2) return false;
+
+        // 이번 핸드 참가자 고정 (도중 입장·같은 자리 새 플레이어는 다음 핸드까지 제외)
+        state.setSeatIndicesInHand(new HashSet<>(order));
+        Set<String> playerIdsInHand = order.stream()
+                .map(idx -> table.getSeat(idx).getPlayer())
+                .filter(p -> p != null && p.getId() != null)
+                .map(com.holdup.server.player.Player::getId)
+                .collect(Collectors.toSet());
+        state.setPlayerIdsInHand(playerIdsInHand);
 
         int dealer, sbSeat, bbSeat;
         if (order.size() == 2) {
@@ -146,8 +167,10 @@ public class GameFlowService {
         int next = table.findNextActingSeat(seatIndexWhoActed);
         if (next >= 0) {
             state.setActingSeatIndex(next);
-            // 한 바퀴 돌아서 첫 액션자까지 왔고, 모두 베팅 맞춤이면 스트릿 종료
-            if (next == state.getFirstActingSeatIndexThisStreet() && allHaveMatchedOrAllIn(table)) {
+            // 한 바퀴 끝: '현재' 액션 가능한 플레이어 중 첫 번째로 돌아왔는지로 판단 (폴드한 사람 제외)
+            int firstActiveThisRound = table.findFirstActingSeatThisStreet();
+            boolean roundComplete = (next == firstActiveThisRound);
+            if (roundComplete && allHaveMatchedOrAllIn(table)) {
                 advanceStreetOrShowdown(table);
             }
             return true;
@@ -160,12 +183,25 @@ public class GameFlowService {
         return true;
     }
 
+    /** 이번 핸드 참가자만 기준으로, 전원 콜/올인했는지. (playerIdsInHand 기준) */
     private boolean allHaveMatchedOrAllIn(Table table) {
         HandState state = table.getHandState();
         BigDecimal currentBet = state.getCurrentBet();
+        Set<String> playerIdsInHand = state.getPlayerIdsInHand();
+        if (playerIdsInHand.isEmpty()) {
+            for (Seat seat : table.getSeats()) {
+                if (seat.isEmpty()) continue;
+                Player p = seat.getPlayer();
+                if (p.isFolded()) continue;
+                if (p.isAllIn()) continue;
+                if (p.getCurrentBetThisStreet().compareTo(currentBet) < 0) return false;
+            }
+            return true;
+        }
         for (Seat seat : table.getSeats()) {
             if (seat.isEmpty()) continue;
             Player p = seat.getPlayer();
+            if (p == null || !playerIdsInHand.contains(p.getId())) continue;
             if (p.isFolded()) continue;
             if (p.isAllIn()) continue;
             if (p.getCurrentBetThisStreet().compareTo(currentBet) < 0) return false;
@@ -189,7 +225,7 @@ public class GameFlowService {
         }
         state.setCurrentBet(BigDecimal.ZERO);
 
-        List<Integer> order = table.getOccupiedSeatIndicesInOrder(state.getDealerSeatIndex() + 1);
+        List<Integer> order = table.getInHandSeatIndicesInOrder(state.getDealerSeatIndex() + 1);
         int firstActing = -1;
         for (Integer idx : order) {
             Player p = table.getSeat(idx).getPlayer();
@@ -218,10 +254,13 @@ public class GameFlowService {
     }
 
     private void runShowdown(Table table) {
+        Set<String> playerIdsInHand = table.getHandState().getPlayerIdsInHand();
         List<ParticipantHand> participants = new ArrayList<>();
         for (Seat seat : table.getSeats()) {
             if (seat.isEmpty()) continue;
             Player p = seat.getPlayer();
+            if (p == null) continue;
+            if (!playerIdsInHand.isEmpty() && !playerIdsInHand.contains(p.getId())) continue;
             if (p.isFolded()) continue;
             participants.add(ParticipantHand.builder()
                     .seatIndex(seat.getSeatIndex())
@@ -236,9 +275,19 @@ public class GameFlowService {
                     .addToStack(table.getHandState().getPot());
             table.getHandState().setPot(BigDecimal.ZERO);
             table.getHandState().setPhase(GamePhase.WAITING);
+            table.getHandState().setSeatIndicesInHand(Set.of());
+            table.getHandState().setPlayerIdsInHand(Set.of());
             table.setDeck(null);
             removeBustedPlayers(table);
             return;
+        }
+
+        // 쇼다운: 모든 참여자 패 공개 후 브로드캐스트
+        table.getHandState().setPhase(GamePhase.SHOWDOWN);
+        TableSnapshot showdownSnapshot = tableSnapshotService.toSnapshotWithShowdownCards(table);
+        if (showdownSnapshot != null) {
+            messagingTemplate.convertAndSend("/topic/table/" + table.getId(),
+                    ActionResult.builder().payload(Map.of("tableState", showdownSnapshot)).build());
         }
 
         List<SeatHandResult> results = winnerResolver.evaluateWinners(participants, table.getHandState().getCommunityCards());
@@ -264,21 +313,29 @@ public class GameFlowService {
 
         table.getHandState().setPot(BigDecimal.ZERO);
         table.getHandState().setPhase(GamePhase.WAITING);
+        table.getHandState().setSeatIndicesInHand(Set.of());
+        table.getHandState().setPlayerIdsInHand(Set.of());
         table.setDeck(null);
 
         removeBustedPlayers(table);
     }
 
+    /** 한 명만 남았을 때 팟 지급. 이번 핸드 참가자(playerIdsInHand) 중 폴드 안 한 사람만 대상. */
     private void awardPotToLastStanding(Table table) {
+        Set<String> playerIdsInHand = table.getHandState().getPlayerIdsInHand();
         for (Seat seat : table.getSeats()) {
             if (seat.isEmpty()) continue;
             Player p = seat.getPlayer();
+            if (p == null) continue;
+            if (!playerIdsInHand.isEmpty() && !playerIdsInHand.contains(p.getId())) continue;
             if (p.isFolded()) continue;
             p.addToStack(table.getHandState().getPot());
             break;
         }
         table.getHandState().setPot(BigDecimal.ZERO);
         table.getHandState().setPhase(GamePhase.WAITING);
+        table.getHandState().setSeatIndicesInHand(Set.of());
+        table.getHandState().setPlayerIdsInHand(Set.of());
         table.setDeck(null);
 
         removeBustedPlayers(table);

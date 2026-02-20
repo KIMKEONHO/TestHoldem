@@ -46,6 +46,12 @@ public class UserAccountService {
         return Optional.of(toDomain(user));
     }
 
+    /** 이메일 사용 여부 (중복 여부). null/blank면 false */
+    public boolean isEmailTaken(String email) {
+        if (email == null || email.isBlank()) return false;
+        return repository.findByEmail(email.trim().toLowerCase()).isPresent();
+    }
+
     public Optional<String> findIdByEmail(String email) {
         return repository.findByEmail(email).map(UserAccountEntity::getUsername);
     }

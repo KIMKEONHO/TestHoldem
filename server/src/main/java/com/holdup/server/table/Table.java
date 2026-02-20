@@ -9,6 +9,7 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 홀덤 테이블. 시트, 현재 핸드 상태, 덱, 블라인드 설정.
@@ -165,20 +166,60 @@ public class Table {
         return order;
     }
 
-    /** 폴드하지 않고 핸드에 참여 중인 시트 수. */
+    /**
+     * 이번 핸드에 참여한 시트만 startFrom 부터 시계 방향으로.
+     * 참가 여부는 playerIdsInHand 기준(현재 그 자리에 앉은 플레이어 ID). 도중 입장·같은 자리 새 플레이어 제외.
+     */
+    public List<Integer> getInHandSeatIndicesInOrder(int startFrom) {
+        Set<String> playerIdsInHand = handState.getPlayerIdsInHand();
+        if (playerIdsInHand.isEmpty()) {
+            return getOccupiedSeatIndicesInOrder(startFrom);
+        }
+        int n = seats.size();
+        List<Integer> order = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            int idx = (startFrom + i) % n;
+            com.holdup.server.player.Player p = seats.get(idx).getPlayer();
+            if (p != null && p.getId() != null && playerIdsInHand.contains(p.getId())) {
+                order.add(idx);
+            }
+        }
+        return order;
+    }
+
+    /** 폴드하지 않고 이번 핸드에 참여 중인 시트 수 (playerIdsInHand 기준). */
     public long countActiveInHand() {
+        Set<String> playerIdsInHand = handState.getPlayerIdsInHand();
+        if (playerIdsInHand.isEmpty()) {
+            return seats.stream()
+                    .filter(s -> !s.isEmpty() && s.getPlayer() != null && !s.getPlayer().isFolded())
+                    .count();
+        }
         return seats.stream()
-                .filter(s -> !s.isEmpty() && s.getPlayer() != null && !s.getPlayer().isFolded())
+                .filter(s -> !s.isEmpty() && s.getPlayer() != null
+                        && playerIdsInHand.contains(s.getPlayer().getId())
+                        && !s.getPlayer().isFolded())
                 .count();
     }
 
-    /** 폴드하지 않은 다음 액션 가능 시트 인덱스 (actingSeatIndex 다음부터). 없으면 -1. */
+    /** 폴드하지 않은 다음 액션 가능 시트 인덱스 (이번 핸드 참가자만). 없으면 -1. */
     public int findNextActingSeat(int fromSeatIndex) {
-        List<Integer> order = getOccupiedSeatIndicesInOrder((fromSeatIndex + 1) % getMaxSeats());
+        List<Integer> order = getInHandSeatIndicesInOrder((fromSeatIndex + 1) % getMaxSeats());
         for (Integer idx : order) {
             com.holdup.server.player.Player p = getSeat(idx).getPlayer();
             if (p != null && !p.isFolded() && !p.isAllIn()) return idx;
         }
         return -1;
+    }
+
+    /** 이번 스트릿에서 액션 가능한(폴드·올인 아님) 플레이어 중 순서상 첫 번째 시트 인덱스. 없으면 -1. */
+    public int findFirstActingSeatThisStreet() {
+        int startFrom = (handState.getDealerSeatIndex() + 1) % getMaxSeats();
+        List<Integer> order = getInHandSeatIndicesInOrder(startFrom);
+        for (Integer idx : order) {
+            com.holdup.server.player.Player p = getSeat(idx).getPlayer();
+            if (p != null && !p.isFolded() && !p.isAllIn()) return idx;
+        }
+        return order.isEmpty() ? -1 : order.get(0);
     }
 }

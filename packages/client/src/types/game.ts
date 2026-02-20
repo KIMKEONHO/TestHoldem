@@ -92,4 +92,8 @@ export interface HandStateSnapshot {
   currentBet: number;
   actingSeatIndex: number | null;
   minRaise: number;
+  /** 이번 핸드에 참여한 시트 인덱스. */
+  inHandSeatIndices?: number[];
+  /** 이번 핸드에 참여한 플레이어 ID (도중 입장 제외). 있으면 이걸로 amIInHand 판단. */
+  inHandPlayerIds?: string[];
 }

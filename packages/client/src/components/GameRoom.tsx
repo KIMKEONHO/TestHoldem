@@ -248,10 +248,9 @@ function buildWinnerShowcase(prev: TableSnapshot, next: TableSnapshot): WinnerSh
 function getSeatPosition(seatIndex: number, totalSeats: number) {
   const count = Math.max(totalSeats, 2);
   const angle = ((seatIndex / count) * (Math.PI * 2)) - (Math.PI / 2);
-  const radiusX = 44;
-  const radiusY = 38;
-  const x = 50 + Math.cos(angle) * radiusX;
-  const y = 50 + Math.sin(angle) * radiusY;
+  const r = 49;
+  const x = 50 + Math.cos(angle) * r;
+  const y = 50 + Math.sin(angle) * r;
   return { left: `${x}%`, top: `${y}%` };
 }
 
@@ -314,7 +313,9 @@ export function GameRoom({
   const [notices, setNotices] = useState<TableNotice[]>([]);
   const [winnerBanner, setWinnerBanner] = useState<string | null>(null);
   const [winnerShowcase, setWinnerShowcase] = useState<WinnerShowcasePlayer[]>([]);
+  const [showdownSnapshot, setShowdownSnapshot] = useState<TableSnapshot | null>(null);
   const winnerBannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showdownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bubbleTimersRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
   const prevTableStateRef = useRef<TableSnapshot | null>(null);
   const sendJoin = () => {
@@ -351,16 +352,25 @@ export function GameRoom({
 
   const applyIncomingTableState = (nextState: TableSnapshot) => {
     const prevState = prevTableStateRef.current;
+    const nextPhase = (nextState.handState?.phase ?? '').toUpperCase();
+    const prevPhase = (prevState?.handState?.phase ?? '').toUpperCase();
+
+    if (nextPhase === 'SHOWDOWN') {
+      setShowdownSnapshot(nextState);
+      if (showdownTimerRef.current) clearTimeout(showdownTimerRef.current);
+      showdownTimerRef.current = setTimeout(() => {
+        setShowdownSnapshot(null);
+        showdownTimerRef.current = null;
+      }, 5000);
+    }
+
     if (prevState) {
       const winnerNotice = buildWinnerNotice(prevState, nextState);
       if (winnerNotice) {
-        addNotice(winnerNotice);
         setWinnerBanner(winnerNotice);
-        setWinnerShowcase(buildWinnerShowcase(prevState, nextState));
         if (winnerBannerTimerRef.current) clearTimeout(winnerBannerTimerRef.current);
         winnerBannerTimerRef.current = setTimeout(() => {
           setWinnerBanner(null);
-          setWinnerShowcase([]);
           winnerBannerTimerRef.current = null;
         }, 5000);
       }
@@ -483,6 +493,7 @@ export function GameRoom({
       clearTimeout(timeoutTimer);
       clearTimeout(retryTimer);
       if (winnerBannerTimerRef.current) clearTimeout(winnerBannerTimerRef.current);
+      if (showdownTimerRef.current) clearTimeout(showdownTimerRef.current);
       Object.values(bubbleTimersRef.current).forEach((timer) => clearTimeout(timer));
       bubbleTimersRef.current = {};
       // 구독 해제를 약간 지연해 Strict Mode에서 즉시 UNSUB 되는 것 방지
@@ -518,14 +529,28 @@ export function GameRoom({
   const handState: HandStateSnapshot | undefined = tableState?.handState;
   const actingSeat = handState?.actingSeatIndex != null ? Number(handState.actingSeatIndex) : null;
   const mySeat = mySeatIndex != null ? Number(mySeatIndex) : null;
+
+  // 내 시트 정보 (홀카드·플레이어 ID·참가 여부용)
+  const mySeatSnapshot = tableState?.seats?.find((s) => s.seatIndex === mySeatIndex)
+    ?? tableState?.seats?.find((s) => s.player?.displayName === nickname);
+  const myPlayerId = mySeatSnapshot?.player?.id;
+
+  const phase = (handState?.phase ?? '').toUpperCase();
+  const inHandPlayerIds = handState?.inHandPlayerIds;
+  const inHandSeatSet = handState?.inHandSeatIndices != null && handState.inHandSeatIndices.length > 0
+    ? new Set(handState.inHandSeatIndices)
+    : null;
+  const amIInHand = mySeatIndex == null ? false
+    : phase === 'WAITING' ? true
+    : inHandPlayerIds != null && inHandPlayerIds.length > 0
+      ? (myPlayerId != null && inHandPlayerIds.includes(myPlayerId))
+      : inHandSeatSet == null ? true
+      : inHandSeatSet.has(mySeatIndex);
   const isMyTurn =
+    amIInHand &&
     actingSeat != null &&
     mySeat != null &&
     actingSeat === mySeat;
-
-  // 내 시트 정보 (홀카드 표시용)
-  const mySeatSnapshot = tableState?.seats?.find((s) => s.seatIndex === mySeatIndex)
-    ?? tableState?.seats?.find((s) => s.player?.displayName === nickname);
   const bestHandName = useMemo(() => {
     const holeCards = mySeatSnapshot?.player?.holeCards ?? [];
     const communityCards = tableState?.handState?.communityCards ?? [];
@@ -573,18 +598,23 @@ export function GameRoom({
       <div className="table-container">
         <div className="game-table-wrap">
           {/* 테이블 둘레에 앉은 좌석 (말풍선 + 아바타) */}
-          {(tableState?.seats ?? []).map((seat: SeatSnapshot) => {
+          {(() => {
+            const displayState = showdownSnapshot ?? tableState;
+            const seatsList = displayState?.seats ?? [];
+            return seatsList.map((seat: SeatSnapshot) => {
             if (!seat.player) return null;
-            const total = (tableState?.seats ?? []).filter((s) => s.player).length;
+            const total = seatsList.filter((s) => s.player).length;
             const pos = getSeatPosition(seat.seatIndex, Math.max(total, 1));
+            const isShowdown = (displayState?.handState?.phase ?? '').toUpperCase() === 'SHOWDOWN';
+            const showHoleCards = isShowdown && seat.player.holeCards && seat.player.holeCards.length > 0;
             return (
               <div
                 key={seat.seatIndex}
-                className={`seat-item ${seat.seatIndex === mySeatIndex ? 'me' : ''} ${seat.player.folded ? 'folded' : ''}`}
+                className={`seat-item ${seat.seatIndex === mySeatIndex ? 'me' : ''} ${seat.player.folded ? 'folded' : ''} ${showHoleCards ? 'showdown' : ''}`}
                 style={{ left: pos.left, top: pos.top }}
               >
                 {seatBubbles[seat.seatIndex] && (
-                  <div className={`seat-bubble ${seatBubbles[seat.seatIndex].mine ? 'mine' : ''}`}>
+                  <div className={`seat-bubble ${seatBubbles[seat.seatIndex].mine ? 'mine' : ''}`} role="status">
                     {seatBubbles[seat.seatIndex].text}
                   </div>
                 )}
@@ -593,29 +623,33 @@ export function GameRoom({
                 </div>
                 <span className="seat-name">{seat.player.displayName}</span>
                 <span className="seat-stack">{Number(seat.player.stack)}</span>
-                {seat.player.folded && <span className="fold-label">폴드</span>}
+                {seat.player.folded && !showHoleCards && <span className="fold-label">폴드</span>}
+                {showHoleCards && (
+                  <div className="seat-showdown-cards">
+                    {seat.player.holeCards!.map((code, i) => {
+                      const d = parseCardForDisplay(code);
+                      return d ? (
+                        <div key={i} className={`poker-card showdown-card ${d.isRed ? 'red' : 'black'}`}>
+                          <span className="card-rank">{d.rank}</span>
+                          <span className="card-suit">{d.suitChar}</span>
+                        </div>
+                      ) : (
+                        <div key={i} className="poker-card showdown-card black">
+                          <span className="card-rank">?</span>
+                          <span className="card-suit">?</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             );
-          })}
+          });
+          })()}
           <div className="poker-table">
             {winnerBanner && (
               <div className="winner-banner" role="alert">
                 <span className="winner-banner-text">{winnerBanner}</span>
-                {winnerShowcase.length > 0 && (
-                  <div className="winner-showcase">
-                    {winnerShowcase.map((player) => (
-                      <div key={player.seatIndex} className={`winner-showcase-row ${player.isWinner ? 'winner' : ''}`}>
-                        <span className="winner-showcase-name">{player.name}</span>
-                        <span className="winner-showcase-cards">
-                          {player.cards.map((code, i) => (
-                            <span key={`${player.seatIndex}-${i}`} className="winner-showcase-card">{formatCard(code)}</span>
-                          ))}
-                        </span>
-                        {player.handName && <span className="winner-showcase-hand">{player.handName}</span>}
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             )}
             <div className="table-surface">
@@ -640,7 +674,10 @@ export function GameRoom({
                     })}
                   </div>
                   <div className="phase">{tableState.handState?.phase ?? 'WAITING'}</div>
-                  {handState?.actingSeatIndex != null && (
+                  {!amIInHand && phase !== 'WAITING' && (
+                    <p className="turn-info waiting-mid-join">다음 게임까지 대기 중입니다.</p>
+                  )}
+                  {amIInHand && handState?.actingSeatIndex != null && (
                     <p className="turn-info">
                       {isMyTurn ? (
                         <strong className="my-turn">당신의 턴입니다</strong>
@@ -714,7 +751,9 @@ export function GameRoom({
           )}
         </div>
         {handState?.phase !== 'WAITING' ? (
-          isMyTurn && !amIFolded ? (
+          !amIInHand ? (
+            <p className="waiting-turn waiting-mid-join">다음 게임까지 대기 중입니다.</p>
+          ) : isMyTurn && !amIFolded ? (
             <div className="action-bar">
               <button type="button" className="action-btn fold" onClick={() => sendAction('FOLD')}>
                 다이
@@ -840,6 +879,8 @@ export function GameRoom({
           box-shadow: 0 4px 12px rgba(0,0,0,0.25);
           border: 2px solid var(--bg-table);
           min-width: 72px;
+          width: max-content;
+          z-index: 20;
         }
         .game-table-wrap .seat-item.me {
           border-color: var(--accent);
@@ -849,34 +890,43 @@ export function GameRoom({
           opacity: 0.65;
         }
         .seat-bubble {
-          order: -1;
-          padding: 4px 10px;
-          border-radius: 8px;
-          background: rgba(15, 23, 42, 0.92);
+          position: absolute;
+          bottom: 100%;
+          left: 50%;
+          transform: translate(-50%, 0);
+          margin-bottom: 8px;
+          padding: 6px 14px;
+          border-radius: 10px;
+          background: rgba(15, 23, 42, 0.96);
           color: #f8fafc;
-          font-size: 0.72rem;
-          font-weight: 600;
+          font-size: 0.85rem;
+          font-weight: 700;
           white-space: nowrap;
-          border: 1px solid rgba(255,255,255,0.2);
-          box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-          position: relative;
-          margin-bottom: 2px;
-          animation: pop-bubble 0.2s ease-out;
+          border: 2px solid rgba(255,255,255,0.3);
+          box-shadow: 0 4px 16px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.08);
+          pointer-events: none;
+          animation: pop-bubble 0.25s ease-out;
+          z-index: 25;
         }
         .seat-bubble::after {
           content: '';
           position: absolute;
-          bottom: -6px;
+          top: 100%;
           left: 50%;
           transform: translateX(-50%);
-          border: 6px solid transparent;
-          border-top-color: rgba(15, 23, 42, 0.92);
+          border: 8px solid transparent;
+          border-top-color: rgba(15, 23, 42, 0.96);
         }
         .seat-bubble.mine {
           background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%);
-          border-color: rgba(147, 197, 253, 0.5);
+          border-color: rgba(147, 197, 253, 0.6);
+          box-shadow: 0 4px 20px rgba(30, 64, 175, 0.5), 0 0 0 1px rgba(255,255,255,0.1);
         }
         .seat-bubble.mine::after { border-top-color: #1e40af; }
+        @keyframes pop-bubble {
+          from { transform: translate(-50%, 8px); opacity: 0; }
+          to { transform: translate(-50%, 0); opacity: 1; }
+        }
         .seat-avatar {
           width: 44px;
           height: 44px;
@@ -911,8 +961,30 @@ export function GameRoom({
           color: var(--danger);
           font-weight: 600;
         }
+        .seat-showdown-cards {
+          display: flex;
+          gap: 2px;
+          justify-content: center;
+          flex-wrap: wrap;
+          margin-top: 4px;
+        }
+        .seat-showdown-cards .showdown-card {
+          width: 28px;
+          height: 38px;
+          padding: 2px;
+          border-radius: 4px;
+          font-size: 0.65rem;
+        }
+        .seat-showdown-cards .showdown-card .card-rank {
+          font-size: 0.7rem;
+          font-weight: 700;
+        }
+        .seat-showdown-cards .showdown-card .card-suit {
+          font-size: 0.75rem;
+        }
         .poker-table {
           position: relative;
+          z-index: 1;
           width: 76%;
           height: 76%;
           max-width: 640px;
@@ -1093,10 +1165,6 @@ export function GameRoom({
           background: rgba(30, 64, 175, 0.9);
           border-color: rgba(147, 197, 253, 0.7);
         }
-        @keyframes pop-bubble {
-          from { transform: translateY(4px); opacity: 0; }
-          to { transform: translateY(0); opacity: 1; }
-        }
         .actions {
           display: flex;
           justify-content: center;
@@ -1259,6 +1327,11 @@ export function GameRoom({
           text-align: center;
           font-size: 0.9rem;
           color: var(--text-muted);
+        }
+        .waiting-turn.waiting-mid-join,
+        .turn-info.waiting-mid-join {
+          color: #fde68a;
+          font-weight: 600;
           margin: 0;
         }
         .btn.start-hand {

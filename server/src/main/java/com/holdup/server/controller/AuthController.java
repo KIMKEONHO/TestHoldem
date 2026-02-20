@@ -5,6 +5,7 @@ import com.holdup.server.auth.UserAccountService;
 import com.holdup.server.auth.dto.AuthRequest;
 import com.holdup.server.auth.dto.AuthResponse;
 import com.holdup.server.auth.dto.FindIdRequest;
+import com.holdup.server.auth.dto.LoginRequest;
 import com.holdup.server.auth.dto.ResetPasswordRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -13,7 +14,10 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -61,7 +65,7 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<AuthResponse> login(@Valid @RequestBody AuthRequest request) {
+    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
         return accountService.authenticate(request.getUsername().trim(), request.getPassword())
                 .map(account -> ResponseEntity.ok(AuthResponse.builder()
                         .success(true)
@@ -75,6 +79,12 @@ public class AuthController {
                         .success(false)
                         .message("아이디 또는 비밀번호가 올바르지 않습니다.")
                         .build()));
+    }
+
+    @GetMapping("/check-email")
+    public ResponseEntity<Map<String, Boolean>> checkEmail(@RequestParam String email) {
+        boolean taken = accountService.isEmailTaken(email);
+        return ResponseEntity.ok(Map.of("taken", taken));
     }
 
     @PostMapping("/find-id")

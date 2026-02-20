@@ -1,10 +1,12 @@
 package com.holdup.server.action;
 
 import com.holdup.server.action.dto.ActionResult;
+import com.holdup.server.gamestate.GamePhase;
 import com.holdup.server.service.TableManager;
 import com.holdup.server.table.Table;
 
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * 액션 핸들러 공통: 테이블 조회·턴 검증.
@@ -52,7 +54,22 @@ public final class ActionValidation {
                     .tableId(tableId)
                     .build());
         }
-        if (table.getHandState().getActingSeatIndex() != seatIndex) {
+        // 게임 진행 중인데 이번 핸드 참가자가 아니면(도중 입장) 액션 거부
+        var handState = table.getHandState();
+        if (handState.getPhase() != GamePhase.WAITING) {
+            Set<String> playerIdsInHand = handState.getPlayerIdsInHand();
+            if (!playerIdsInHand.isEmpty() && !playerIdsInHand.contains(playerId)) {
+                return Optional.of(ActionResult.builder()
+                        .success(false)
+                        .message("이번 게임에는 참가하지 않습니다. 다음 게임까지 대기해 주세요.")
+                        .actionType(actionType)
+                        .playerId(playerId)
+                        .tableId(tableId)
+                        .seatIndex(seatIndex)
+                        .build());
+            }
+        }
+        if (handState.getActingSeatIndex() != seatIndex) {
             return Optional.of(ActionResult.builder()
                     .success(false)
                     .message("Not your turn")
