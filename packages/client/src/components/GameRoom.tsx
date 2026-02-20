@@ -1047,6 +1047,14 @@ export function GameRoom({
         .best-hand strong {
           color: #fef3c7;
         }
+        .best-hand {
+          margin: 0 0 10px 0;
+          font-size: 0.9rem;
+          color: #fde68a;
+        }
+        .best-hand strong {
+          color: #fef3c7;
+        }
         .card.my-card {
           background: linear-gradient(135deg, #fff 0%, #e2e8f0 100%);
           padding: 8px 12px;
