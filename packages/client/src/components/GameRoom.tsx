@@ -148,6 +148,24 @@ function formatCard(cardCode: string): string {
   return `${rankPart}${suit}`;
 }
 
+/** 카드 코드 → { rank, suitChar, isRed } (카드 이미지용) */
+function parseCardForDisplay(code: string): { rank: string; suitChar: string; isRed: boolean } | null {
+  const p = parseCard(code);
+  if (!p) return null;
+  const rankMap: Record<number, string> = { 14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: '10', 9: '9', 8: '8', 7: '7', 6: '6', 5: '5', 4: '4', 3: '3', 2: '2' };
+  const suitChar = SUIT_SYMBOL[p.suit] ?? '';
+  const isRed = p.suit === 'h' || p.suit === 'd';
+  return { rank: rankMap[p.rank] ?? String(p.rank), suitChar, isRed };
+}
+
+/** 테이블 둘레에 앉을 좌석 위치 (각도 → x,y 비율). 최대 9석. */
+function getSeatPosition(seatIndex: number, total: number): { x: number; y: number } {
+  if (total <= 0) return { x: 0.5, y: 0.5 };
+  const angle = (seatIndex / total) * 2 * Math.PI - Math.PI / 2;
+  const r = 0.48;
+  return { x: 0.5 + r * Math.cos(angle), y: 0.5 + r * Math.sin(angle) };
+}
+
 type SeatActionBubble = {
   text: string;
   mine: boolean;
@@ -413,34 +431,55 @@ export function GameRoom({
       )}
 
       <div className="table-container">
-        <div className="poker-table">
-          <div className="table-surface">
-            {tableState ? (
-              <>
-                <p className="table-name">{tableState.tableName}</p>
-                <div className="pot">팟: {Number(tableState.handState?.pot ?? 0)}</div>
-                <div className="community-cards">
-                  {(tableState.handState?.communityCards ?? []).map((code, i) => (
-                    <span key={i} className="card">
-                      {formatCard(code)}
-                    </span>
-                  ))}
-                </div>
-                <div className="phase">{tableState.handState?.phase ?? 'WAITING'}</div>
-                {mySeatSnapshot?.player?.holeCards && mySeatSnapshot.player.holeCards.length > 0 && (
-                  <div className="my-cards">
-                    <span className="my-cards-label">내 패:</span>
-                    {mySeatSnapshot.player.holeCards.map((code, i) => (
-                      <span key={i} className="card my-card">
-                        {formatCard(code)}
-                      </span>
-                    ))}
+        <div className="game-table-wrap">
+          {/* 테이블 둘레에 좌석 (사람 형체 + 말풍선) */}
+          {(tableState?.seats ?? []).filter((s): s is SeatSnapshot => !!s.player).map((seat: SeatSnapshot) => {
+            const total = (tableState?.seats ?? []).filter((s) => s.player).length;
+            const pos = getSeatPosition(seat.seatIndex, Math.max(total, 1));
+            return (
+              <div
+                key={seat.seatIndex}
+                className={`seat-item ${seat.seatIndex === mySeatIndex ? 'me' : ''} ${seat.player!.folded ? 'folded' : ''}`}
+                style={{ left: `${pos.x * 100}%`, top: `${pos.y * 100}%` }}
+              >
+                {seatBubbles[seat.seatIndex] && (
+                  <div className={`seat-bubble ${seatBubbles[seat.seatIndex].mine ? 'mine' : ''}`}>
+                    {seatBubbles[seat.seatIndex].text}
                   </div>
                 )}
-                {bestHandName && (
-                  <p className="best-hand">현재 최고 패: <strong>{bestHandName}</strong></p>
-                )}
-                {handState?.actingSeatIndex != null && (
+                <div className="seat-avatar" aria-hidden>
+                  <span className="seat-avatar-icon">👤</span>
+                </div>
+                <span className="seat-name">{seat.player!.displayName}</span>
+                <span className="seat-stack">{Number(seat.player!.stack)}</span>
+                {seat.player!.folded && <span className="fold-label">폴드</span>}
+              </div>
+            );
+          })}
+          <div className="poker-table">
+            <div className="table-surface">
+              {tableState ? (
+                <>
+                  <p className="table-name">{tableState.tableName}</p>
+                  <div className="pot">팟: {Number(tableState.handState?.pot ?? 0)}</div>
+                  <div className="community-cards">
+                    {(tableState.handState?.communityCards ?? []).map((code, i) => {
+                      const d = parseCardForDisplay(code);
+                      return d ? (
+                        <div key={i} className={`poker-card table-card ${d.isRed ? 'red' : 'black'}`}>
+                          <span className="card-rank">{d.rank}</span>
+                          <span className="card-suit">{d.suitChar}</span>
+                        </div>
+                      ) : (
+                        <div key={i} className="poker-card table-card black">
+                          <span className="card-rank">?</span>
+                          <span className="card-suit">?</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="phase">{tableState.handState?.phase ?? 'WAITING'}</div>
+                  {handState?.actingSeatIndex != null && (
                   <p className="turn-info">
                     {isMyTurn ? (
                       <strong className="my-turn">당신의 턴입니다</strong>
@@ -453,73 +492,6 @@ export function GameRoom({
                       </>
                     )}
                   </p>
-                )}
-                <div className="seats">
-                  {(tableState.seats ?? []).map(
-                    (seat: SeatSnapshot) =>
-                      seat.player && (
-                        <div
-                          key={seat.seatIndex}
-                          className={`seat ${seat.seatIndex === mySeatIndex ? 'me' : ''} ${seat.player.folded ? 'folded' : ''}`}
-                        >
-                          <span className="seat-name">시트 {seat.seatIndex + 1} · {seat.player.displayName}</span>
-                          <span className="seat-stack">{Number(seat.player.stack)}</span>
-                          {seatBubbles[seat.seatIndex] && (
-                            <span className={`action-bubble ${seatBubbles[seat.seatIndex].mine ? 'mine' : ''}`}>
-                              {seatBubbles[seat.seatIndex].text}
-                            </span>
-                          )}
-                          {seat.seatIndex === mySeatIndex && seat.player.holeCards?.length ? (
-                            <span className="hole-cards">
-                              {seat.player.holeCards.map((code) => formatCard(code)).join(' ')}
-                            </span>
-                          ) : (
-                            seat.player.folded && <span className="fold-label">폴드</span>
-                          )}
-                        </div>
-                      )
-                  )}
-                </div>
-                {handState?.phase !== 'WAITING' && (
-                  <>
-                    {isMyTurn && !amIFolded ? (
-                      <div className="actions">
-                        <button type="button" className="act-btn" onClick={() => sendAction('FOLD')}>
-                          폴드
-                        </button>
-                        <button type="button" className="act-btn" disabled={!canCheck} onClick={() => sendAction('CHECK')}>
-                          체크
-                        </button>
-                        <button type="button" className="act-btn" disabled={!canCall} onClick={() => sendAction('CALL')}>
-                          콜 {canCall ? toCall : ''}
-                        </button>
-                        <button
-                          type="button"
-                          className="act-btn"
-                          disabled={!canRaise}
-                          onClick={() => sendAction('RAISE', toCall + minRaise)}
-                        >
-                          최소 레이즈 {toCall + minRaise}
-                        </button>
-                        <button type="button" className="act-btn" disabled={myStack <= 0} onClick={() => sendAction('ALL_IN')}>
-                          올인
-                        </button>
-                      </div>
-                    ) : (
-                      <p className="waiting-turn">
-                        {amIFolded ? '폴드하셨습니다.' : '다른 플레이어의 턴을 기다리는 중…'}
-                      </p>
-                    )}
-                  </>
-                )}
-                {handState?.phase === 'WAITING' && mySeatIndex != null && (
-                  <button
-                    type="button"
-                    className="btn start-hand"
-                    onClick={() => sendAction('START_HAND')}
-                  >
-                    핸드 시작
-                  </button>
                 )}
                 {tableState && (!tableState.seats || tableState.seats.length === 0) && (
                   <button type="button" className="btn start-hand" onClick={sendJoin}>
@@ -540,22 +512,32 @@ export function GameRoom({
                 )}
               </>
             )}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* 하단 고정: 내 패 + 액션 버튼 (참고 이미지 레이아웃) */}
+      {/* 하단 고정: 내 패(카드 이미지) + 액션 버튼 */}
       <div className="player-bar">
         <div className="my-hand-section">
           {mySeatSnapshot?.player?.holeCards && mySeatSnapshot.player.holeCards.length > 0 ? (
             <>
               <span className="my-hand-label">내 패</span>
               <div className="my-hand-cards">
-                {mySeatSnapshot.player.holeCards.map((code, i) => (
-                  <div key={i} className="poker-card">
-                    {formatCard(code)}
-                  </div>
-                ))}
+                {mySeatSnapshot.player.holeCards.map((code, i) => {
+                  const d = parseCardForDisplay(code);
+                  return d ? (
+                    <div key={i} className={`poker-card ${d.isRed ? 'red' : 'black'}`}>
+                      <span className="card-rank">{d.rank}</span>
+                      <span className="card-suit">{d.suitChar}</span>
+                    </div>
+                  ) : (
+                    <div key={i} className="poker-card black">
+                      <span className="card-rank">?</span>
+                      <span className="card-suit">?</span>
+                    </div>
+                  );
+                })}
               </div>
               {bestHandName && (
                 <span className="my-best-hand">{bestHandName}</span>
@@ -658,15 +640,111 @@ export function GameRoom({
           display: flex;
           align-items: center;
           justify-content: center;
-          padding: 16px;
+          padding: clamp(12px, 3vw, 24px);
+        }
+        .game-table-wrap {
+          position: relative;
+          width: clamp(340px, 92vw, 860px);
+          height: clamp(420px, 58vh, 620px);
+          max-width: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .game-table-wrap .seat-item {
+          position: absolute;
+          transform: translate(-50%, -50%);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 4px;
+          padding: 8px 12px;
+          background: var(--bg-card);
+          border-radius: 12px;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+          border: 2px solid var(--bg-table);
+          min-width: 72px;
+        }
+        .game-table-wrap .seat-item.me {
+          border-color: var(--accent);
+          box-shadow: 0 0 0 2px var(--accent);
+        }
+        .game-table-wrap .seat-item.folded {
+          opacity: 0.65;
+        }
+        .seat-bubble {
+          order: -1;
+          padding: 4px 10px;
+          border-radius: 8px;
+          background: rgba(15, 23, 42, 0.92);
+          color: #f8fafc;
+          font-size: 0.72rem;
+          font-weight: 600;
+          white-space: nowrap;
+          border: 1px solid rgba(255,255,255,0.2);
+          box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+          position: relative;
+          margin-bottom: 2px;
+          animation: pop-bubble 0.2s ease-out;
+        }
+        .seat-bubble::after {
+          content: '';
+          position: absolute;
+          bottom: -6px;
+          left: 50%;
+          transform: translateX(-50%);
+          border: 6px solid transparent;
+          border-top-color: rgba(15, 23, 42, 0.92);
+        }
+        .seat-bubble.mine {
+          background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%);
+          border-color: rgba(147, 197, 253, 0.5);
+        }
+        .seat-bubble.mine::after { border-top-color: #1e40af; }
+        .seat-avatar {
+          width: 44px;
+          height: 44px;
+          border-radius: 50%;
+          background: linear-gradient(180deg, #334155 0%, #1e293b 100%);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border: 2px solid #475569;
+          overflow: hidden;
+        }
+        .seat-avatar-icon {
+          font-size: 24px;
+          filter: grayscale(0.4) contrast(1.1);
+        }
+        .game-table-wrap .seat-name {
+          font-size: 0.8rem;
+          font-weight: 700;
+          color: var(--text);
+          display: block;
+          text-align: center;
+          max-width: 100%;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .game-table-wrap .seat-stack {
+          font-size: 0.75rem;
+          color: var(--text-muted);
+        }
+        .game-table-wrap .fold-label {
+          font-size: 0.7rem;
+          color: var(--danger);
+          font-weight: 600;
         }
         .poker-table {
-          width: 100%;
-          max-width: 520px;
-          min-height: 320px;
+          width: 76%;
+          height: 76%;
+          max-width: 640px;
+          max-height: 460px;
+          min-width: 280px;
+          min-height: 280px;
           border-radius: 50%;
           background: var(--bg-table);
-          border: 12px solid #0a3d5c;
+          border: clamp(8px, 1.8vw, 14px) solid #0a3d5c;
           box-shadow: inset 0 0 40px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.4);
           display: flex;
           align-items: center;
@@ -675,7 +753,7 @@ export function GameRoom({
         .table-surface {
           text-align: center;
           color: rgba(255,255,255,0.95);
-          padding: 16px;
+          padding: clamp(12px, 2.5vw, 20px);
         }
         .table-name, .table-label {
           font-size: 1rem;
@@ -693,10 +771,22 @@ export function GameRoom({
         }
         .community-cards {
           display: flex;
-          gap: 4px;
+          gap: 8px;
           justify-content: center;
           flex-wrap: wrap;
-          margin-bottom: 8px;
+          margin-bottom: 10px;
+        }
+        .community-cards .table-card {
+          width: 56px;
+          height: 78px;
+          border-radius: 8px;
+          font-size: 1rem;
+        }
+        .community-cards .table-card .card-rank {
+          font-size: 1.1rem;
+        }
+        .community-cards .table-card .card-suit {
+          font-size: 1.25rem;
         }
         .card {
           display: inline-block;
@@ -820,6 +910,49 @@ export function GameRoom({
         }
         .best-hand strong {
           color: #fef3c7;
+        }
+        .player-bar {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        .my-hand-section {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 6px;
+        }
+        .my-hand-cards {
+          display: flex;
+          gap: 6px;
+          justify-content: center;
+          flex-wrap: wrap;
+        }
+        .poker-card {
+          width: 48px;
+          height: 68px;
+          border-radius: 6px;
+          background: linear-gradient(145deg, #fff 0%, #f1f5f9 100%);
+          border: 1px solid #cbd5e1;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: 4px;
+        }
+        .poker-card.red .card-rank,
+        .poker-card.red .card-suit { color: #dc2626; }
+        .poker-card.black .card-rank,
+        .poker-card.black .card-suit { color: #1e293b; }
+        .poker-card .card-rank {
+          font-size: 1rem;
+          font-weight: 800;
+          line-height: 1.1;
+        }
+        .poker-card .card-suit {
+          font-size: 1.1rem;
+          line-height: 1;
         }
         .card.my-card {
           background: linear-gradient(135deg, #fff 0%, #e2e8f0 100%);
