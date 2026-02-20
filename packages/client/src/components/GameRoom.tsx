@@ -1,4 +1,3 @@
-
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { APP_PREFIX, TOPIC_PREFIX, USER_QUEUE_TABLE_STATE } from '../config';
 import type {
@@ -148,27 +147,41 @@ function formatCard(cardCode: string): string {
   return `${rankPart}${suit}`;
 }
 
-/** 카드 코드 → { rank, suitChar, isRed } (카드 이미지용) */
-function parseCardForDisplay(code: string): { rank: string; suitChar: string; isRed: boolean } | null {
-  if (!code?.trim()) return null;
-  const c = code.trim().toLowerCase();
-  if (c.length < 2) return null;
-  const suit = c.slice(-1);
-  const rankRaw = c.slice(0, -1).toUpperCase();
-  const rankNum = rankRaw === 'A' ? 14 : rankRaw === 'K' ? 13 : rankRaw === 'Q' ? 12 : rankRaw === 'J' ? 11 : rankRaw === 'T' ? 10 : Number(rankRaw);
-  if (!['h', 'd', 'c', 's'].includes(suit) || Number.isNaN(rankNum) || rankNum < 2 || rankNum > 14) return null;
-  const rankMap: Record<number, string> = { 14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: '10', 9: '9', 8: '8', 7: '7', 6: '6', 5: '5', 4: '4', 3: '3', 2: '2' };
-  const suitChar = SUIT_SYMBOL[suit] ?? '';
-  const isRed = suit === 'h' || suit === 'd';
-  return { rank: rankMap[rankNum] ?? String(rankNum), suitChar, isRed };
+function parseCardForDisplay(cardCode: string): string {
+  return formatCard(cardCode);
 }
 
-function getSeatPosition(seatIndex: number, totalSeats: number): { left: string; top: string } {
-  const count = Math.max(totalSeats, 1);
-  const angle = (seatIndex / count) * 2 * Math.PI - Math.PI / 2;
-  const r = 48;
-  const x = 50 + Math.cos(angle) * r;
-  const y = 50 + Math.sin(angle) * r;
+
+
+function buildWinnerNotice(prev: TableSnapshot, next: TableSnapshot): string | null {
+  const prevPhase = prev.handState?.phase;
+  const nextPhase = next.handState?.phase;
+  if (prevPhase === 'WAITING' || nextPhase !== 'WAITING') return null;
+
+  let bestName: string | null = null;
+  let bestDelta = 0;
+  for (const nextSeat of next.seats ?? []) {
+    if (!nextSeat.player) continue;
+    const prevSeat = prev.seats?.find((s) => s.seatIndex === nextSeat.seatIndex);
+    const prevStack = Number(prevSeat?.player?.stack ?? 0);
+    const nextStack = Number(nextSeat.player.stack ?? 0);
+    const delta = nextStack - prevStack;
+    if (delta > bestDelta) {
+      bestDelta = delta;
+      bestName = nextSeat.player.displayName;
+    }
+  }
+
+  if (!bestName || bestDelta <= 0) return null;
+  return `${bestName} 승리! (+${bestDelta})`;
+}
+function getSeatPosition(seatIndex: number, totalSeats: number) {
+  const count = Math.max(totalSeats, 2);
+  const angle = ((seatIndex / count) * (Math.PI * 2)) - (Math.PI / 2);
+  const radiusX = 44;
+  const radiusY = 38;
+  const x = 50 + Math.cos(angle) * radiusX;
+  const y = 50 + Math.sin(angle) * radiusY;
   return { left: `${x}%`, top: `${y}%` };
 }
 
@@ -230,7 +243,7 @@ export function GameRoom({
   const [seatBubbles, setSeatBubbles] = useState<Record<number, SeatActionBubble>>({});
   const [notices, setNotices] = useState<TableNotice[]>([]);
   const bubbleTimersRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
-
+  const prevTableStateRef = useRef<TableSnapshot | null>(null);
   const sendJoin = () => {
     if (!isConnected || !roomId || !nickname) return;
     setJoinError(null);
@@ -261,6 +274,18 @@ export function GameRoom({
     setTimeout(() => {
       setNotices((prev) => prev.filter((n) => n.id !== id));
     }, 2500);
+  };
+
+  const applyIncomingTableState = (nextState: TableSnapshot) => {
+    const prevState = prevTableStateRef.current;
+    if (prevState) {
+      const winnerNotice = buildWinnerNotice(prevState, nextState);
+      if (winnerNotice) addNotice(winnerNotice);
+    }
+
+    prevTableStateRef.current = nextState;
+    setTableState(nextState);
+    syncMySeatIndex(nextState);
   };
 
   const showActionBubble = (result: ActionResult) => {
@@ -300,6 +325,7 @@ export function GameRoom({
 
     setTableState(null);
     setMySeatIndex(null);
+    prevTableStateRef.current = null;
 
     const unsub = subscribe(`${TOPIC_PREFIX}/table/${roomId}`, (body) => {
       try {
@@ -312,8 +338,7 @@ export function GameRoom({
           addNotice(res.message ?? `${leavingName ?? '플레이어'} 님이 나갔습니다.`);
         }
         if (res.payload?.tableState) {
-          setTableState(res.payload.tableState);
-          syncMySeatIndex(res.payload.tableState);
+          applyIncomingTableState(res.payload.tableState);
           setJoinError(null);
           setJoinTimeout(false);
         } else if (res.success && res.tableId) {
@@ -350,8 +375,7 @@ export function GameRoom({
         const res = typeof body === 'string' ? (JSON.parse(body) as ActionResult) : (body as ActionResult);
         showActionBubble(res);
         if (res.payload?.tableState) {
-          setTableState(res.payload.tableState);
-          syncMySeatIndex(res.payload.tableState);
+          applyIncomingTableState(res.payload.tableState);
           setJoinError(null);
           setJoinTimeout(false);
         }
@@ -463,49 +487,70 @@ export function GameRoom({
       )}
 
       <div className="table-container">
-        <div className="game-table-wrap">
-          {/* 테이블 둘레에 앉은 좌석 (말풍선 + 아바타) */}
-          {(tableState?.seats ?? []).filter((s): s is SeatSnapshot => !!s.player).map((seat: SeatSnapshot) => {
-            const total = (tableState?.seats ?? []).filter((s) => s.player).length;
-            const pos = getSeatPosition(seat.seatIndex, Math.max(total, 1));
-            return (
-              <div
-                key={seat.seatIndex}
-                className={`seat-item ${seat.seatIndex === mySeatIndex ? 'me' : ''} ${seat.player.folded ? 'folded' : ''}`}
-                style={{ left: pos.left, top: pos.top }}
-              >
-                {seatBubbles[seat.seatIndex] && (
-                  <div className={`seat-bubble ${seatBubbles[seat.seatIndex].mine ? 'mine' : ''}`}>
-                    {seatBubbles[seat.seatIndex].text}
+        <div className="poker-table">
+          <div className="table-surface">
+            {tableState ? (
+              <>
+                <p className="table-name">{tableState.tableName}</p>
+                <div className="pot">팟: {Number(tableState.handState?.pot ?? 0)}</div>
+                <div className="community-cards">
+                  {(tableState.handState?.communityCards ?? []).map((code, i) => (
+                    <span key={i} className="card">
+                      {parseCardForDisplay(code)}
+                    </span>
+                  ))}
+                </div>
+                <div className="phase">{tableState.handState?.phase ?? 'WAITING'}</div>
+                {mySeatSnapshot?.player?.holeCards && mySeatSnapshot.player.holeCards.length > 0 && (
+                  <div className="my-cards">
+                    <span className="my-cards-label">내 패:</span>
+                    {mySeatSnapshot.player.holeCards.map((code, i) => (
+                      <span key={i} className="card my-card">
+                        {parseCardForDisplay(code)}
+                      </span>
+                    ))}
                   </div>
                 )}
-                <div className="seat-avatar" aria-hidden>
-                  <span className="seat-avatar-icon">👤</span>
-                </div>
-                <span className="seat-name">{seat.player.displayName}</span>
-                <span className="seat-stack">{Number(seat.player.stack)}</span>
-                {seat.player.folded && <span className="fold-label">폴드</span>}
-              </div>
-            );
-          })}
-          <div className="poker-table">
-            <div className="table-surface">
-              {tableState ? (
-                <>
-                  <p className="table-name">{tableState.tableName}</p>
-                  <div className="pot">팟: {Number(tableState.handState?.pot ?? 0)}</div>
-                  <div className="community-cards">
-                    {(tableState.handState?.communityCards ?? []).map((code, i) => {
-                      const d = parseCardForDisplay(code);
-                      return d ? (
-                        <div key={i} className={`poker-card table-card ${d.isRed ? 'red' : 'black'}`}>
-                          <span className="card-rank">{d.rank}</span>
-                          <span className="card-suit">{d.suitChar}</span>
-                        </div>
-                      ) : (
-                        <div key={i} className="poker-card table-card black">
-                          <span className="card-rank">?</span>
-                          <span className="card-suit">?</span>
+                {bestHandName && (
+                  <p className="best-hand">현재 최고 패: <strong>{bestHandName}</strong></p>
+                )}
+                {handState?.actingSeatIndex != null && (
+                  <p className="turn-info">
+                    {isMyTurn ? (
+                      <strong className="my-turn">당신의 턴입니다</strong>
+                    ) : (
+                      <>
+                        현재 턴: 시트 {handState.actingSeatIndex + 1}
+                        {tableState.seats?.find((s) => s.seatIndex === handState.actingSeatIndex)?.player && (
+                          <> ({tableState.seats.find((s) => s.seatIndex === handState.actingSeatIndex)?.player?.displayName})</>
+                        )}
+                      </>
+                    )}
+                  </p>
+                )}
+                <div className="seats">
+                  {(tableState.seats ?? []).map(
+                    (seat: SeatSnapshot) =>
+                      seat.player && (
+                        <div
+                          key={seat.seatIndex}
+                          className={`seat ${seat.seatIndex === mySeatIndex ? 'me' : ''} ${seat.player.folded ? 'folded' : ''}`}
+                          style={getSeatPosition(seat.seatIndex, tableState.seats.length)}
+                        >
+                          <span className="seat-name">시트 {seat.seatIndex + 1} · {seat.player.displayName}</span>
+                          <span className="seat-stack">{Number(seat.player.stack)}</span>
+                          {seatBubbles[seat.seatIndex] && (
+                            <span className={`action-bubble ${seatBubbles[seat.seatIndex].mine ? 'mine' : ''}`}>
+                              {seatBubbles[seat.seatIndex].text}
+                            </span>
+                          )}
+                          {seat.seatIndex === mySeatIndex && seat.player.holeCards?.length ? (
+                            <span className="hole-cards">
+                              {seat.player.holeCards.map((code) => parseCardForDisplay(code)).join(' ')}
+                            </span>
+                          ) : (
+                            seat.player.folded && <span className="fold-label">폴드</span>
+                          )}
                         </div>
                       );
                     })}
@@ -525,26 +570,67 @@ export function GameRoom({
                       )}
                     </p>
                   )}
-                  {tableState && (!tableState.seats || tableState.seats.length === 0) && (
-                    <button type="button" className="btn start-hand" onClick={sendJoin}>
-                      상태 새로고침
-                    </button>
-                  )}
-                </>
-              ) : (
-                <>
-                  <p className="table-label">홀덤 테이블</p>
-                  <p className="table-hint">
-                    {joinTimeout ? '입장 응답이 없습니다. 서버가 켜져 있는지 확인하고 재시도해 주세요.' : '입장 중…'}
-                  </p>
-                  {joinTimeout && (
-                    <button type="button" className="btn start-hand" onClick={sendJoin}>
-                      입장 재시도
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
+                </div>
+                {handState?.phase !== 'WAITING' && (
+                  <>
+                    {isMyTurn && !amIFolded ? (
+                      <div className="actions">
+                        <button type="button" className="act-btn" onClick={() => sendAction('FOLD')}>
+                          폴드
+                        </button>
+                        <button type="button" className="act-btn" disabled={!canCheck} onClick={() => sendAction('CHECK')}>
+                          체크
+                        </button>
+                        <button type="button" className="act-btn" disabled={!canCall} onClick={() => sendAction('CALL')}>
+                          콜 {canCall ? toCall : ''}
+                        </button>
+                        <button
+                          type="button"
+                          className="act-btn"
+                          disabled={!canRaise}
+                          onClick={() => sendAction('RAISE', toCall + minRaise)}
+                        >
+                          최소 레이즈 {toCall + minRaise}
+                        </button>
+                        <button type="button" className="act-btn" disabled={myStack <= 0} onClick={() => sendAction('ALL_IN')}>
+                          올인
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="waiting-turn">
+                        {amIFolded ? '폴드하셨습니다.' : '다른 플레이어의 턴을 기다리는 중…'}
+                      </p>
+                    )}
+                  </>
+                )}
+                {handState?.phase === 'WAITING' && mySeatIndex != null && (
+                  <button
+                    type="button"
+                    className="btn start-hand"
+                    onClick={() => sendAction('START_HAND')}
+                  >
+                    핸드 시작
+                  </button>
+                )}
+                {tableState && (!tableState.seats || tableState.seats.length === 0) && (
+                  <button type="button" className="btn start-hand" onClick={sendJoin}>
+                    상태 새로고침
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                <p className="table-label">홀덤 테이블</p>
+                <p className="table-hint">
+                  {joinTimeout ? '입장 응답이 없습니다. 서버가 켜져 있는지 확인하고 재시도해 주세요.' : '입장 중…'}
+                </p>
+                {joinTimeout && (
+                  <button type="button" className="btn start-hand" onClick={sendJoin}>
+                    입장 재시도
+                  </button>
+                )}
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -784,12 +870,9 @@ export function GameRoom({
         }
         .poker-table {
           position: relative;
-          width: 76%;
-          height: 76%;
-          max-width: 640px;
-          max-height: 460px;
-          min-width: 280px;
-          min-height: 280px;
+          width: 100%;
+          max-width: 520px;
+          min-height: 320px;
           border-radius: 50%;
           background: var(--bg-table);
           border: clamp(8px, 1.8vw, 14px) solid #0a3d5c;
@@ -1005,6 +1088,14 @@ export function GameRoom({
         .poker-card .card-suit {
           font-size: 1.1rem;
           line-height: 1;
+        }
+        .best-hand {
+          margin: 0 0 10px 0;
+          font-size: 0.9rem;
+          color: #fde68a;
+        }
+        .best-hand strong {
+          color: #fef3c7;
         }
         .best-hand {
           margin: 0 0 10px 0;
