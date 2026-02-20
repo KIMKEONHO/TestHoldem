@@ -1,3 +1,4 @@
+
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { APP_PREFIX, TOPIC_PREFIX, USER_QUEUE_TABLE_STATE } from '../config';
 import type {
@@ -147,8 +148,6 @@ function formatCard(cardCode: string): string {
   return `${rankPart}${suit}`;
 }
 
-
-
 type SeatActionBubble = {
   text: string;
   mine: boolean;
@@ -231,7 +230,6 @@ export function GameRoom({
       setMySeatIndex(byNickname.seatIndex);
     }
   };
-
 
 
   const addNotice = (text: string) => {
@@ -569,8 +567,82 @@ export function GameRoom({
                 )}
               </>
             )}
+            </div>
           </div>
         </div>
+      </div>
+
+      {/* 하단 고정: 내 패(카드 이미지) + 액션 버튼 */}
+      <div className="player-bar">
+        <div className="my-hand-section">
+          {mySeatSnapshot?.player?.holeCards && mySeatSnapshot.player.holeCards.length > 0 ? (
+            <>
+              <span className="my-hand-label">내 패</span>
+              <div className="my-hand-cards">
+                {mySeatSnapshot.player.holeCards.map((code, i) => {
+                  const d = parseCardForDisplay(code);
+                  return d ? (
+                    <div key={i} className={`poker-card ${d.isRed ? 'red' : 'black'}`}>
+                      <span className="card-rank">{d.rank}</span>
+                      <span className="card-suit">{d.suitChar}</span>
+                    </div>
+                  ) : (
+                    <div key={i} className="poker-card black">
+                      <span className="card-rank">?</span>
+                      <span className="card-suit">?</span>
+                    </div>
+                  );
+                })}
+              </div>
+              {bestHandName && (
+                <span className="my-best-hand">{bestHandName}</span>
+              )}
+            </>
+          ) : (
+            handState?.phase !== 'WAITING' && !amIFolded && (
+              <span className="my-hand-placeholder">카드 배분 중…</span>
+            )
+          )}
+          {amIFolded && handState?.phase !== 'WAITING' && (
+            <span className="my-hand-folded">폴드</span>
+          )}
+        </div>
+        {handState?.phase !== 'WAITING' ? (
+          isMyTurn && !amIFolded ? (
+            <div className="action-bar">
+              <button type="button" className="action-btn fold" onClick={() => sendAction('FOLD')}>
+                다이
+              </button>
+              <button type="button" className="action-btn" disabled={!canCheck} onClick={() => sendAction('CHECK')}>
+                체크
+              </button>
+              <button type="button" className="action-btn" disabled={!canCall} onClick={() => sendAction('CALL')}>
+                콜 {canCall ? `(${toCall})` : ''}
+              </button>
+              <button
+                type="button"
+                className="action-btn raise"
+                disabled={!canRaise}
+                onClick={() => sendAction('RAISE', toCall + minRaise)}
+              >
+                레이즈
+              </button>
+              <button type="button" className="action-btn allin" disabled={myStack <= 0} onClick={() => sendAction('ALL_IN')}>
+                올인
+              </button>
+            </div>
+          ) : (
+            <p className="waiting-turn">
+              {amIFolded ? '폴드하셨습니다.' : '다른 플레이어의 턴을 기다리는 중…'}
+            </p>
+          )
+        ) : (
+          mySeatIndex != null && (
+            <button type="button" className="action-btn start-hand" onClick={() => sendAction('START_HAND')}>
+              핸드 시작
+            </button>
+          )
+        )}
       </div>
 
       {!isConnected && (
@@ -638,15 +710,111 @@ export function GameRoom({
           display: flex;
           align-items: center;
           justify-content: center;
-          padding: 16px;
+          padding: clamp(12px, 3vw, 24px);
+        }
+        .game-table-wrap {
+          position: relative;
+          width: clamp(340px, 92vw, 860px);
+          height: clamp(420px, 58vh, 620px);
+          max-width: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .game-table-wrap .seat-item {
+          position: absolute;
+          transform: translate(-50%, -50%);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 4px;
+          padding: 8px 12px;
+          background: var(--bg-card);
+          border-radius: 12px;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+          border: 2px solid var(--bg-table);
+          min-width: 72px;
+        }
+        .game-table-wrap .seat-item.me {
+          border-color: var(--accent);
+          box-shadow: 0 0 0 2px var(--accent);
+        }
+        .game-table-wrap .seat-item.folded {
+          opacity: 0.65;
+        }
+        .seat-bubble {
+          order: -1;
+          padding: 4px 10px;
+          border-radius: 8px;
+          background: rgba(15, 23, 42, 0.92);
+          color: #f8fafc;
+          font-size: 0.72rem;
+          font-weight: 600;
+          white-space: nowrap;
+          border: 1px solid rgba(255,255,255,0.2);
+          box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+          position: relative;
+          margin-bottom: 2px;
+          animation: pop-bubble 0.2s ease-out;
+        }
+        .seat-bubble::after {
+          content: '';
+          position: absolute;
+          bottom: -6px;
+          left: 50%;
+          transform: translateX(-50%);
+          border: 6px solid transparent;
+          border-top-color: rgba(15, 23, 42, 0.92);
+        }
+        .seat-bubble.mine {
+          background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%);
+          border-color: rgba(147, 197, 253, 0.5);
+        }
+        .seat-bubble.mine::after { border-top-color: #1e40af; }
+        .seat-avatar {
+          width: 44px;
+          height: 44px;
+          border-radius: 50%;
+          background: linear-gradient(180deg, #334155 0%, #1e293b 100%);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border: 2px solid #475569;
+          overflow: hidden;
+        }
+        .seat-avatar-icon {
+          font-size: 24px;
+          filter: grayscale(0.4) contrast(1.1);
+        }
+        .game-table-wrap .seat-name {
+          font-size: 0.8rem;
+          font-weight: 700;
+          color: var(--text);
+          display: block;
+          text-align: center;
+          max-width: 100%;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .game-table-wrap .seat-stack {
+          font-size: 0.75rem;
+          color: var(--text-muted);
+        }
+        .game-table-wrap .fold-label {
+          font-size: 0.7rem;
+          color: var(--danger);
+          font-weight: 600;
         }
         .poker-table {
-          width: 100%;
-          max-width: 520px;
-          min-height: 320px;
+          width: 76%;
+          height: 76%;
+          max-width: 640px;
+          max-height: 460px;
+          min-width: 280px;
+          min-height: 280px;
           border-radius: 50%;
           background: var(--bg-table);
-          border: 12px solid #0a3d5c;
+          border: clamp(8px, 1.8vw, 14px) solid #0a3d5c;
           box-shadow: inset 0 0 40px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.4);
           display: flex;
           align-items: center;
@@ -655,7 +823,7 @@ export function GameRoom({
         .table-surface {
           text-align: center;
           color: rgba(255,255,255,0.95);
-          padding: 16px;
+          padding: clamp(12px, 2.5vw, 20px);
         }
         .table-name, .table-label {
           font-size: 1rem;
@@ -673,10 +841,22 @@ export function GameRoom({
         }
         .community-cards {
           display: flex;
-          gap: 4px;
+          gap: 8px;
           justify-content: center;
           flex-wrap: wrap;
-          margin-bottom: 8px;
+          margin-bottom: 10px;
+        }
+        .community-cards .table-card {
+          width: 56px;
+          height: 78px;
+          border-radius: 8px;
+          font-size: 1rem;
+        }
+        .community-cards .table-card .card-rank {
+          font-size: 1.1rem;
+        }
+        .community-cards .table-card .card-suit {
+          font-size: 1.25rem;
         }
         .card {
           display: inline-block;
@@ -742,9 +922,9 @@ export function GameRoom({
         }
         .actions {
           display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
           justify-content: center;
+          gap: 8px;
+          align-items: center;
         }
         .act-btn {
           padding: 8px 14px;
@@ -760,12 +940,97 @@ export function GameRoom({
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 8px;
-          margin-bottom: 12px;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.2), 0 0 0 1px rgba(0,0,0,0.06);
         }
-        .my-cards-label {
+        .my-best-hand {
+          display: inline-block;
+          font-size: 0.8rem;
+          color: #fde68a;
+          margin-top: 4px;
+        }
+        .my-hand-placeholder, .my-hand-folded {
           font-size: 0.9rem;
-          font-weight: 600;
+          color: var(--text-muted);
+        }
+        .my-hand-folded { color: var(--danger); }
+        .action-bar {
+          display: flex;
+          gap: 8px;
+          justify-content: center;
+          flex-wrap: wrap;
+        }
+        .action-btn {
+          flex: 1;
+          min-width: 64px;
+          padding: 12px 10px;
+          border: none;
+          border-radius: 10px;
+          font-weight: 700;
+          font-size: 0.9rem;
+          color: #fff;
+          background: linear-gradient(135deg, #0d9488 0%, #0e7490 50%, #0369a1 100%);
+          box-shadow: 0 2px 12px rgba(6, 182, 212, 0.4);
+          cursor: pointer;
+          transition: transform 0.1s, box-shadow 0.2s;
+        }
+        .best-hand {
+          margin: 0 0 10px 0;
+          font-size: 0.9rem;
+          color: #fde68a;
+        }
+        .best-hand strong {
+          color: #fef3c7;
+        }
+        .player-bar {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        .my-hand-section {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 6px;
+        }
+        .my-hand-cards {
+          display: flex;
+          gap: 6px;
+          justify-content: center;
+          flex-wrap: wrap;
+        }
+        .poker-card {
+          width: 48px;
+          height: 68px;
+          border-radius: 6px;
+          background: linear-gradient(145deg, #fff 0%, #f1f5f9 100%);
+          border: 1px solid #cbd5e1;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: 4px;
+        }
+        .poker-card.red .card-rank,
+        .poker-card.red .card-suit { color: #dc2626; }
+        .poker-card.black .card-rank,
+        .poker-card.black .card-suit { color: #1e293b; }
+        .poker-card .card-rank {
+          font-size: 1rem;
+          font-weight: 800;
+          line-height: 1.1;
+        }
+        .poker-card .card-suit {
+          font-size: 1.1rem;
+          line-height: 1;
+        }
+        .best-hand {
+          margin: 0 0 10px 0;
+          font-size: 0.9rem;
+          color: #fde68a;
+        }
+        .best-hand strong {
+          color: #fef3c7;
         }
         .best-hand {
           margin: 0 0 10px 0;
@@ -782,9 +1047,10 @@ export function GameRoom({
           font-weight: 600;
         }
         .waiting-turn {
+          text-align: center;
           font-size: 0.9rem;
-          opacity: 0.9;
-          margin: 8px 0 0 0;
+          color: var(--text-muted);
+          margin: 0;
         }
         .btn.start-hand {
           padding: 10px 20px;
