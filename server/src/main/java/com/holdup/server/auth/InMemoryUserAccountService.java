@@ -21,14 +21,15 @@ public class InMemoryUserAccountService {
         return Optional.ofNullable(users.get(username));
     }
 
-    public UserAccount register(String username, String rawPassword, String displayName) {
+    public UserAccount register(String username, String rawPassword, String displayName, String email) {
         if (users.containsKey(username)) {
             throw new IllegalArgumentException("이미 존재하는 아이디입니다.");
         }
         UserAccount account = new UserAccount(
                 username,
                 passwordEncoder.encode(rawPassword),
-                displayName
+                displayName,
+                email != null ? email : ""
         );
         users.put(username, account);
         return account;
