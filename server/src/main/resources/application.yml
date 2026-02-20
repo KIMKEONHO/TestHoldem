@@ -4,6 +4,16 @@ server:
 spring:
   application:
     name: holdup-server
+  datasource:
+    url: jdbc:h2:file:./data/holdupdb;AUTO_SERVER=TRUE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    show-sql: false
 
 # 홀덤 게임 설정
 holdup:
@@ -11,6 +21,9 @@ holdup:
     max-players-per-room: 8
     # 핸드 시작에 필요한 최소 인원 (2=일반, 1=테스트용 혼자 플레이)
     min-players-to-start: 2
+  security:
+    jwt-secret: "change-this-secret-in-production"
+    jwt-exp-seconds: 43200
 
 logging:
   level:
